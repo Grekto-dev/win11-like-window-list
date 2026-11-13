@@ -23,6 +23,16 @@ unless stated otherwise.
 | Two or more windows | front tile shrinks to 35 px, a 3 px sliver of a back tile (1 px shorter top and bottom) sits 2 px to its right; icon and indicator stay centred on the 40 px cell. The sliver only shows while the tile has a fill (hover / focused). |
 | Attention (flashing) | tile fill pulses orange (≈ `rgba(255,106,72,.45)` at peak) with a ≈ 2 s period; indicator turns pink `#ff99a4` |
 
+## Behaviour (additions measured later in the same VM)
+
+- **Pinned and running buttons mix freely.** An unpinned running app can sit between pinned ones; a new window's app is appended at the end, a newly pinned app goes after the nearest earlier pinned one.
+- **Drag to reorder.** Starts after the usual few pixels of movement. The tile and indicator vanish; the icon alone follows the pointer along the bar only (it never leaves it), slightly enlarged (~1.2x, approximation). Neighbours slide aside (~250 ms, ease-out) when the icon reaches their tile. On release the icon settles into its slot (~200 ms). Esc during the drag does nothing (the drag continues and drops on release). Releasing outside the bar still drops into the slot shown.
+- **New button.** The group recentres as the slot opens (~180 ms), then the icon rises into place (~160 ms). **Closing:** the icon drops and fades (~130 ms) and the slot collapses (~200 ms).
+- **Progress.** While an app reports progress the bar replaces the running indicator: a 1 px track as wide as the icon with a 3 px accent fill. Indeterminate progress sweeps a segment left to right on a ~1.1 s loop. Error/paused states change the fill colour (not reproduced: Linux has no equivalent state).
+- **Badge.** Windows' overlay icon / notification count is a ~16 px accent circle at the icon's top-right corner, bold number in black (Linux counterpart: notification count of the app and the Unity LauncherEntry `count`).
+- **Flyout / jump list motion.** Both slide up from under the bar, clipped by it: flyout ≈ 250 ms, jump list ≈ 150–200 ms, strong ease-out; closing is a quick fade (~50 ms).
+- **Dragging an item from another window over a button** brings that app's window forward after a short dwell (Windows) — here 1 s.
+
 ## Behaviour
 
 - Click, not running: launches the app. Icon pops up a few px (launch feedback), indicator appears when the window maps.
@@ -65,4 +75,6 @@ Text only, padding 8 px horizontal, ≈ 30 px high, bottom 13 px above the taskb
 
 ## Not reproduced
 
-Acrylic blur behind the flyout/menus (Cinnamon cannot blur behind chrome actors), jump-list recent files, taskbar badges and progress bars, Windows' exact easing curves.
+- Acrylic blur behind flyouts and menus: Cinnamon's `background-blur` CSS crashes the shell on this machine (SIGABRT in `st_paint_background_blur_effect`), so the applet does not use it. The user's `win11-frosted-panel` extension is the place for blur.
+- Dropping a file on a button to open it with that app (Cinnamon cannot receive external drops on panel actors; only the hover-to-raise part is done).
+- Progress error/paused colours, taskbar thumbnail toolbar buttons, Windows' exact easing curves (durations above are approximations from ~4 fps captures and 30 fps frame logs).

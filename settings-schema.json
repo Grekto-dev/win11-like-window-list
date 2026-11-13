@@ -1,26 +1,41 @@
 {
     "layout1": {
         "type": "layout",
-        "pages": ["general", "flyout"],
+        "pages": ["general", "monitors", "flyout", "extras"],
         "general": {
             "type": "page",
             "title": "General",
-            "sections": ["general-windows", "general-look"]
+            "sections": ["general-look", "general-windows"]
+        },
+        "monitors": {
+            "type": "page",
+            "title": "Monitors",
+            "sections": ["monitors-sync"]
         },
         "flyout": {
             "type": "page",
             "title": "Hover and animations",
             "sections": ["flyout-hover", "flyout-anim"]
         },
-        "general-windows": {
-            "type": "section",
-            "title": "Windows",
-            "keys": ["show-all-workspaces", "show-all-monitors", "super-num-hotkeys"]
+        "extras": {
+            "type": "page",
+            "title": "Jump list and badges",
+            "sections": ["extras-jump", "extras-badges"]
         },
         "general-look": {
             "type": "section",
-            "title": "Appearance",
-            "keys": ["icon-size", "indicator-color"]
+            "title": "Icons",
+            "keys": ["icon-size-mode", "icon-size", "indicator-color"]
+        },
+        "general-windows": {
+            "type": "section",
+            "title": "Windows",
+            "keys": ["show-all-workspaces", "super-num-hotkeys"]
+        },
+        "monitors-sync": {
+            "type": "section",
+            "title": "Several monitors",
+            "keys": ["sync-monitors", "show-all-monitors"]
         },
         "flyout-hover": {
             "type": "section",
@@ -31,6 +46,16 @@
             "type": "section",
             "title": "Animations",
             "keys": ["enable-animations", "launch-animation"]
+        },
+        "extras-jump": {
+            "type": "section",
+            "title": "Jump list (right click)",
+            "keys": ["show-recent", "recent-count"]
+        },
+        "extras-badges": {
+            "type": "section",
+            "title": "Button decorations",
+            "keys": ["show-badges", "show-progress"]
         }
     },
     "pinned-apps": {
@@ -49,21 +74,38 @@
     "show-all-monitors": {
         "type": "switch",
         "default": true,
-        "description": "Show windows from all monitors"
+        "description": "Show windows from all monitors (off: only this monitor's windows)",
+        "dependency": "!sync-monitors"
+    },
+    "sync-monitors": {
+        "type": "switch",
+        "default": false,
+        "description": "Synchronise monitors: every bar with this option shows the same windows, order and pinned apps",
+        "tooltip": "Use when the applet is on the panels of more than one monitor."
     },
     "super-num-hotkeys": {
         "type": "switch",
         "default": true,
         "description": "Super+1…9 activates the Nth button (Super+Shift+N opens a new window)"
     },
+    "icon-size-mode": {
+        "type": "combobox",
+        "default": "auto",
+        "description": "Icon size",
+        "options": {
+            "Automatic (follows the taskbar size)": "auto",
+            "Manual": "manual"
+        }
+    },
     "icon-size": {
         "type": "spinbutton",
         "default": 24,
         "min": 16,
-        "max": 32,
+        "max": 128,
         "step": 2,
         "units": "px",
-        "description": "Icon size"
+        "description": "Manual icon size (at most the taskbar size)",
+        "dependency": "icon-size-mode=manual"
     },
     "indicator-color": {
         "type": "colorchooser",
@@ -103,5 +145,29 @@
         "type": "switch",
         "default": true,
         "description": "Bounce the icon while an app is launching"
+    },
+    "show-recent": {
+        "type": "switch",
+        "default": true,
+        "description": "Show recent files in the jump list (follows the system privacy setting)"
+    },
+    "recent-count": {
+        "type": "spinbutton",
+        "default": 5,
+        "min": 1,
+        "max": 12,
+        "step": 1,
+        "description": "Recent files shown",
+        "dependency": "show-recent"
+    },
+    "show-badges": {
+        "type": "switch",
+        "default": true,
+        "description": "Show the notification count on the button"
+    },
+    "show-progress": {
+        "type": "switch",
+        "default": true,
+        "description": "Show a progress bar on the button while an app reports progress"
     }
 }

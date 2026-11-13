@@ -4,7 +4,7 @@ const Main = imports.ui.main;
 const WindowUtils = imports.misc.windowUtils;
 
 const { Timer } = require('./util');
-const { placeNear, slideOffset, preferredSize, monitorRect } = require('./popup');
+const { placeNear, preferredSize, monitorRect, revealFromPanel } = require('./popup');
 
 const EASE_OUT = Clutter.AnimationMode.EASE_OUT_QUAD;
 const CLOSE_DELAY = 300;     // ms between leaving button/flyout and closing
@@ -64,19 +64,8 @@ class Flyout {
         this._reposition();
 
         if (!switching) {
-            const m = this.applet.metrics;
-            const [dx, dy] = slideOffset(this.applet, m.px(10));
-            this.actor.remove_all_transitions();
-            this.actor.translation_x = dx;
-            this.actor.translation_y = dy;
-            this.actor.ease({
-                opacity: 255,
-                translation_x: 0,
-                translation_y: 0,
-                duration: this.applet.animate ? 167 : 0,
-                mode: EASE_OUT,
-            });
-            if (!this.applet.animate) this.actor.opacity = 255;
+            // Slides up from under the panel (≈ 250 ms, strong ease-out), clipped by the panel edge.
+            revealFromPanel(this.applet, this.actor, 250, Clutter.AnimationMode.EASE_OUT_QUINT);
         } else {
             this.actor.opacity = 255;
         }
@@ -131,7 +120,7 @@ class Flyout {
             done();
         } else {
             actor.set_reactive(false);
-            actor.ease({ opacity: 0, duration: 100, mode: EASE_OUT, onComplete: done });
+            actor.ease({ opacity: 0, duration: 50, mode: EASE_OUT, onComplete: done });
         }
     }
 

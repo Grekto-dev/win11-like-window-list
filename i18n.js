@@ -4,6 +4,7 @@ const GLib = imports.gi.GLib;
 const TABLE = {
     pt: {
         tasks: 'Tarefas',
+        recent: 'Recente',
         pin: 'Fixar na barra de tarefas',
         unpin: 'Desafixar da barra de tarefas',
         close: 'Fechar janela',
@@ -12,6 +13,7 @@ const TABLE = {
     },
     es: {
         tasks: 'Tareas',
+        recent: 'Reciente',
         pin: 'Anclar a la barra de tareas',
         unpin: 'Desanclar de la barra de tareas',
         close: 'Cerrar ventana',
@@ -20,6 +22,7 @@ const TABLE = {
     },
     en: {
         tasks: 'Tasks',
+        recent: 'Recent',
         pin: 'Pin to taskbar',
         unpin: 'Unpin from taskbar',
         close: 'Close window',

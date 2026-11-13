@@ -9,7 +9,12 @@ Internal identifier: `win11-window-list@cinnamon`. Geometry, colours and behavio
 - **Buttons**: 40×40 tiles with 4 px radius, 24 px icons centred in the tile, 4 px gap. Hover, focused, focused + hover and pressed fills, and the icon shrinking while pressed.
 - **Running indicator**: 6×3 grey pill for a running app, 16×3 accent pill for the focused window, none for a pinned app that is not running.
 - **Several windows of one app**: the tile narrows and a second tile peeks out on its right.
-- **Pinned apps**: stay on the left in their saved order; running apps that are not pinned follow. Drag to reorder (pinned buttons never cross unpinned ones). On first run the pins of Cinnamon's *Grouped window list* are imported.
+- **Pinned apps**: pinned and running buttons mix freely, as on Windows; pin from the jump list, by dragging an app from the Start menu onto the bar (an empty slot opens where it will land), or by dragging. On first run the pins of Cinnamon's *Grouped window list* are imported.
+- **Drag to reorder**: only the icon follows the pointer (enlarged, along the bar), neighbours slide aside, the icon settles on release; Esc does nothing, like Windows. Holding a file dragged from another window over a button brings that app forward after 1 s.
+- **Icon size**: *Automatic* follows the bar (half its thickness, 24 px on a 48 px bar) or *Manual* (16 px up to the bar's size).
+- **Several monitors**: *Synchronise monitors* makes every bar that has it on show the same windows, order and pinned apps.
+- **Progress and badges**: a progress bar (windows' `_NET_WM_PROGRESS`, XApp progress and the Unity LauncherEntry protocol) replaces the indicator; the notification count and LauncherEntry counts show as a badge; LauncherEntry `urgent` flashes the button.
+- **Recent files** in the jump list (follows the system privacy setting).
 - **Click behaviour**: not running → launch (icon hops); one window → focus, or minimise if it already has focus; several windows → opens the thumbnail flyout, which stays open until you click elsewhere or press Esc. Middle click or Shift + click opens a new window.
 - **Thumbnail flyout**: opens after 0.4 s of hover, follows the pointer from button to button, shows live previews with title and close button, peeks at the window under the pointer, middle click on a card closes that window. Falls back to a compact list when the cards do not fit the screen.
 - **Jump list** (right click): the app's desktop actions under *Tasks*, the app itself, pin/unpin and close window(s); arrow keys, Enter and Esc work.
@@ -22,7 +27,7 @@ The labels of the jump list follow the system language (Portuguese, Spanish, Eng
 
 ## Not reproduced
 
-Acrylic blur behind the flyouts, recent files in jump lists, taskbar progress bars and badges, and the exact Windows easing curves (durations are approximations).
+Acrylic blur behind the flyouts (Cinnamon's `background-blur` crashes the shell here), dropping files on a button to open them, and the exact Windows easing curves (durations are approximations).
 
 ## Install (development)
 
@@ -39,7 +44,10 @@ Then add **Win11-Like Window List** from *System Settings → Applets*. Remove o
 | File | Role |
 |---|---|
 | `applet.js` | applet, window tracking, pinning, hotkeys, drag and drop |
-| `taskButton.js` | one button: tile, icon, indicator, attention flash |
+| `taskButton.js` | one button: tile, icon, indicator, progress, badge, attention flash |
+| `dragController.js` | reordering by dragging the icon |
+| `shared.js` | state shared by synchronised monitors, Super+N owner |
+| `recent.js` | recent files for the jump list |
 | `flyout.js` | thumbnail flyout and window peek |
 | `contextMenu.js` | jump list |
 | `tooltip.js`, `popup.js`, `i18n.js`, `util.js` | helpers |

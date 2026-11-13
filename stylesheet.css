@@ -35,6 +35,7 @@
 .win11-tb-back {
     border-radius: 4px;
     background-color: transparent;
+    transition-duration: 150ms;
 }
 
 .win11-tb-flash {
@@ -190,4 +191,36 @@
 
 .win11-tb-menu-sep {
     background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ---- progress bar (replaces the indicator while a window reports progress) -- */
+
+.win11-tb-progress-track {
+    border-radius: 1px;
+    background-color: rgba(255, 255, 255, 0.28);
+}
+
+.win11-tb-progress-fill {
+    border-radius: 2px;
+    background-color: #4cc2ff;
+}
+
+/* ---- notification badge: accent circle at the icon's top-right corner ----- */
+
+.win11-tb-badge {
+    border-radius: 99px;
+    background-color: #4cc2ff;
+    padding: 0;
+}
+
+.win11-tb-badge-label {
+    color: #000000;
+    font-weight: bold;
+    font-size: 10px;
+}
+
+/* ---- placeholder while an app from the Start menu is dragged over the bar -- */
+
+.win11-tb-placeholder {
+    background-color: transparent;
 }

@@ -1,8 +1,8 @@
 // Windows 11 style jump list shown on right click of a taskbar button.
-const { Clutter, St } = imports.gi;
+const { Clutter, St, Pango } = imports.gi;
 const Main = imports.ui.main;
 
-const { placeNear, slideOffset, preferredSize } = require('./popup');
+const { placeNear, preferredSize, revealFromPanel } = require('./popup');
 
 const EASE_OUT = Clutter.AnimationMode.EASE_OUT_QUAD;
 
@@ -74,17 +74,8 @@ class ContextMenu {
         const [w, h] = preferredSize(actor);
         const [x, y] = placeNear(this.applet, button.actor, w, h, m.px(14));
         actor.set_position(x, y);
-        const [dx, dy] = slideOffset(this.applet, m.px(10));
-        actor.translation_x = dx;
-        actor.translation_y = dy;
-        actor.ease({
-            opacity: 255,
-            translation_x: 0,
-            translation_y: 0,
-            duration: this.applet.animate ? 167 : 0,
-            mode: EASE_OUT,
-        });
-        if (!this.applet.animate) actor.opacity = 255;
+        // Slides up from under the panel (≈ 200 ms), clipped by the panel edge.
+        revealFromPanel(this.applet, actor, 200, Clutter.AnimationMode.EASE_OUT_CUBIC);
         actor.grab_key_focus();
 
         this._captureId = global.stage.connect('captured-event', (stage, event) => this._onCaptured(event));
@@ -116,11 +107,14 @@ class ContextMenu {
             slot.add_child(item.icon);
         }
         pill.add_child(slot);
-        pill.add_child(new St.Label({
+        const label = new St.Label({
             style_class: 'win11-tb-menu-label',
             text: item.label,
             y_align: Clutter.ActorAlign.CENTER,
-        }));
+            x_expand: true,
+        });
+        if (item.ellipsize) label.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+        pill.add_child(label);
 
         const index = this._rows.length;
         pill.connect('enter-event', () => {
@@ -228,7 +222,7 @@ class ContextMenu {
             done();
         } else {
             actor.set_reactive(false);
-            actor.ease({ opacity: 0, duration: 100, mode: EASE_OUT, onComplete: done });
+            actor.ease({ opacity: 0, duration: 50, mode: EASE_OUT, onComplete: done });
         }
     }
 

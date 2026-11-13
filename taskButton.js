@@ -1,8 +1,10 @@
-// One taskbar button: tile, optional stacked "back" tile, icon, running indicator.
-// Geometry and states follow docs/REFERENCE.md (measured from Windows 11).
-const { Clutter, St } = imports.gi;
+// One taskbar button: tile, optional stacked "back" tile, icon, running indicator,
+// progress bar and notification badge. Geometry and states follow docs/REFERENCE.md
+// (measured from Windows 11). Works on horizontal and vertical panels.
+const { Clutter, St, GLib } = imports.gi;
 
 const EASE_OUT = Clutter.AnimationMode.EASE_OUT_QUAD;
+const EASE_CUBIC = Clutter.AnimationMode.EASE_OUT_CUBIC;
 const EASE_SINE = Clutter.AnimationMode.EASE_IN_OUT_SINE;
 
 class TaskButton {
@@ -17,9 +19,15 @@ class TaskButton {
         this.attention = false;
         this.destroyed = false;
         this.removing = false;
+        this.dragging = false;
+        this.progress = -1;              // 0..100, -1 = none
+        this.pulse = false;
+        this.badgeCount = 0;
         this._flashing = false;
-        this._indicatorWidth = -1;
+        this._indicatorLen = -1;
         this._multi = null;
+        this._pulseId = 0;
+        this._pulseStart = 0;
 
         this.actor = new St.Button({
             style_class: 'win11-tb-button',
@@ -58,12 +66,41 @@ class TaskButton {
             style_class: 'win11-tb-indicator',
             x_expand: true,
             y_expand: true,
-            x_align: Clutter.ActorAlign.CENTER,
-            y_align: Clutter.ActorAlign.END,
             opacity: 0,
         });
+        this.track = new St.Widget({
+            style_class: 'win11-tb-progress-track',
+            x_expand: true,
+            y_expand: true,
+            visible: false,
+        });
+        this.fill = new St.Widget({
+            style_class: 'win11-tb-progress-fill',
+            x_expand: true,
+            y_expand: true,
+            visible: false,
+        });
+        this.badge = new St.Widget({
+            style_class: 'win11-tb-badge',
+            layout_manager: new Clutter.BinLayout(),
+            x_expand: true,
+            y_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+            visible: false,
+        });
+        this.badgeLabel = new St.Label({
+            style_class: 'win11-tb-badge-label',
+            text: '',
+            x_expand: true,
+            y_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this.badge.add_child(this.badgeLabel);
 
-        [this.back, this.tile, this.flash, this.iconBin, this.indicator].forEach(a => this.layout.add_child(a));
+        [this.back, this.tile, this.flash, this.iconBin, this.indicator, this.track, this.fill, this.badge]
+            .forEach(a => this.layout.add_child(a));
 
         this.applyMetrics();
         this.buildIcon();
@@ -88,6 +125,7 @@ class TaskButton {
         this.actor.connect('clicked', (a, button) => this.applet.onButtonClicked(this, button));
         this.actor.connect('destroy', () => {
             this.destroyed = true;
+            this._stopPulse();
         });
     }
 
@@ -95,27 +133,63 @@ class TaskButton {
         return this.app ? this.app.get_name() : this.fallbackName;
     }
 
-    // Drag-and-drop protocol (imports.ui.dnd).
-    getDragActor() {
-        return this.createDragIcon();
-    }
-
-    getDragActorSource() {
-        return this.actor;
-    }
-
     // ---------------------------------------------------------------- geometry
 
     applyMetrics() {
         const m = this.applet.metrics;
+        const H = m.horizontal;
         this.actor.set_size(m.tileW, m.tileH);
-        this.back.set_size(m.backW, Math.max(1, m.tileH - 2 * m.px(1)));
-        this.indicator.set_height(m.indicatorH);
-        this.indicator.translation_y = -m.indicatorBottom;
-        this._indicatorWidth = -1;
+
+        // Back tile of a stacked button: a 3 px sliver at the end of the along axis.
+        const backCross = Math.max(1, (H ? m.tileH : m.tileW) - 2 * m.px(1));
+        this.back.set_size(H ? m.backW : backCross, H ? backCross : m.backW);
+        this.back.set_x_align(H ? Clutter.ActorAlign.END : Clutter.ActorAlign.CENTER);
+        this.back.set_y_align(H ? Clutter.ActorAlign.CENTER : Clutter.ActorAlign.END);
+
+        // Indicator and progress bar sit on the screen-edge side of the panel, 1 px inside the tile.
+        let ax = Clutter.ActorAlign.CENTER;
+        let ay = Clutter.ActorAlign.END;
+        let dx = 0;
+        let dy = 0;
+        switch (m.side) {
+            case St.Side.TOP:
+                ay = Clutter.ActorAlign.START;
+                dy = m.indicatorEdge;
+                break;
+            case St.Side.LEFT:
+                ax = Clutter.ActorAlign.START;
+                ay = Clutter.ActorAlign.CENTER;
+                dx = m.indicatorEdge;
+                break;
+            case St.Side.RIGHT:
+                ax = Clutter.ActorAlign.END;
+                ay = Clutter.ActorAlign.CENTER;
+                dx = -m.indicatorEdge;
+                break;
+            default:
+                dy = -m.indicatorEdge;
+        }
+        [this.indicator, this.track, this.fill].forEach(a => {
+            a.set_x_align(ax);
+            a.set_y_align(ay);
+            a.translation_x = dx;
+            a.translation_y = dy;
+        });
+        const hair = Math.max(1, m.px(1));
+        this.track.set_size(H ? m.icon : hair, H ? hair : m.icon);
+        this.fill.set_size(H ? 0 : m.indicatorH, H ? m.indicatorH : 0);
+
+        // Notification badge: centred on the top-right corner of the icon.
+        const bs = Math.max(m.px(12), Math.round(m.icon * 2 / 3));
+        this.badge.set_size(bs, bs);
+        this.badge.translation_x = Math.round(m.icon / 2 - m.px(2));
+        this.badge.translation_y = -Math.round(m.icon / 2);
+
+        this._indicatorLen = -1;
         this._multi = null;
         this._applyMulti();
         this._applyIndicator(false);
+        this._applyProgress();
     }
 
     _applyMulti() {
@@ -123,24 +197,28 @@ class TaskButton {
         if (multi === this._multi) return;
         this._multi = multi;
         const m = this.applet.metrics;
+        const H = m.horizontal;
         [this.tile, this.flash].forEach(a => {
+            a.set_x_align(Clutter.ActorAlign.FILL);
+            a.set_y_align(Clutter.ActorAlign.FILL);
+            a.set_width(-1);
+            a.set_height(-1);
             if (multi) {
-                a.set_x_align(Clutter.ActorAlign.START);
-                a.set_width(m.tileW - m.stackInset);
-            } else {
-                a.set_x_align(Clutter.ActorAlign.FILL);
-                a.set_width(-1);
+                if (H) {
+                    a.set_x_align(Clutter.ActorAlign.START);
+                    a.set_width(m.tileW - m.stackInset);
+                } else {
+                    a.set_y_align(Clutter.ActorAlign.START);
+                    a.set_height(m.tileH - m.stackInset);
+                }
             }
         });
         this.back.visible = multi;
-        this.back.set_x_align(Clutter.ActorAlign.END);
-        this.back.set_y_align(Clutter.ActorAlign.CENTER);
     }
 
     // -------------------------------------------------------------------- icon
 
-    buildIcon() {
-        const size = this.applet.metrics.icon;
+    _newIcon(size) {
         let icon = null;
         if (this.app) {
             try {
@@ -149,25 +227,30 @@ class TaskButton {
                 icon = null;
             }
         }
-        if (!icon) {
-            icon = new St.Icon({ icon_name: 'application-x-executable', icon_size: size });
-        }
+        return icon || new St.Icon({ icon_name: 'application-x-executable', icon_size: size });
+    }
+
+    buildIcon() {
+        const icon = this._newIcon(this.applet.metrics.icon);
         icon.set_x_expand(true);
         icon.set_y_expand(true);
         icon.set_x_align(Clutter.ActorAlign.CENTER);
         icon.set_y_align(Clutter.ActorAlign.CENTER);
         this.iconBin.destroy_all_children();
         this.iconBin.add_child(icon);
+        this.iconChild = icon;
     }
 
     createDragIcon() {
-        const size = this.applet.metrics.icon;
-        if (this.app) {
-            try {
-                return this.app.create_icon_texture(size);
-            } catch (e) { /* fall through */ }
-        }
-        return new St.Icon({ icon_name: 'application-x-executable', icon_size: size });
+        return this._newIcon(this.applet.metrics.icon);
+    }
+
+    // Stage rectangle of the icon itself.
+    iconRect() {
+        const c = this.iconChild;
+        const [x, y] = c.get_transformed_position();
+        const [w, h] = c.get_transformed_size();
+        return { x, y, w, h };
     }
 
     // ------------------------------------------------------------------ states
@@ -185,14 +268,16 @@ class TaskButton {
         else this.actor.remove_style_pseudo_class('attention');
 
         this._applyMulti();
+        this._applyProgress();
         this._applyIndicator(this.applet.animate);
         this._updateFlash();
     }
 
     _applyIndicator(animate) {
         const m = this.applet.metrics;
-        const running = this.windows.length > 0;
-        const width = this.focused ? m.indicatorActive : m.indicatorIdle;
+        const H = m.horizontal;
+        const running = this.windows.length > 0 && !this.dragging && !this._progressVisible;
+        const len = this.focused ? m.indicatorActive : m.indicatorIdle;
 
         const accent = this.applet.accentColor;
         if (this.focused && !this.attention && accent) {
@@ -202,15 +287,106 @@ class TaskButton {
         }
 
         const opacity = running ? 255 : 0;
-        if (!animate || this._indicatorWidth < 0) {
-            this.indicator.remove_all_transitions();
-            this.indicator.set_width(width);
+        this.indicator.remove_all_transitions();
+        if (!animate || this._indicatorLen < 0) {
+            this.indicator.set_size(H ? len : m.indicatorH, H ? m.indicatorH : len);
             this.indicator.opacity = opacity;
         } else {
-            this.indicator.ease({ width: width, opacity: opacity, duration: 150, mode: EASE_OUT });
+            this.indicator.ease(H
+                ? { width: len, opacity: opacity, duration: 200, mode: EASE_CUBIC }
+                : { height: len, opacity: opacity, duration: 200, mode: EASE_CUBIC });
         }
-        this._indicatorWidth = width;
+        this._indicatorLen = len;
     }
+
+    // ---------------------------------------------------------------- progress
+
+    setProgress(value, pulse) {
+        if (value === this.progress && pulse === this.pulse) return;
+        this.progress = value;
+        this.pulse = pulse;
+        this._applyProgress();
+        this._applyIndicator(false);
+    }
+
+    get _progressVisible() {
+        return this.applet.showProgress && !this.dragging && this.windows.length > 0
+            && (this.pulse || this.progress > 0);
+    }
+
+    // While a window reports progress, the bar replaces the running indicator.
+    _applyProgress() {
+        const visible = this._progressVisible;
+        this.track.visible = visible;
+        this.fill.visible = visible;
+        if (!visible) {
+            this._stopPulse();
+            return;
+        }
+        if (this.pulse) {
+            this._startPulse();
+        } else {
+            this._stopPulse();
+            const len = Math.round(this.applet.metrics.icon * Math.min(100, this.progress) / 100);
+            this._placeFill(0, len);
+        }
+    }
+
+    // Segment [from, from + len) of the track.
+    _placeFill(from, len) {
+        const m = this.applet.metrics;
+        const centre = from - m.icon / 2 + len / 2;
+        if (m.horizontal) {
+            this.fill.set_size(Math.max(0, len), m.indicatorH);
+            this.fill.translation_x = centre;
+        } else {
+            this.fill.set_size(m.indicatorH, Math.max(0, len));
+            this.fill.translation_y = centre;
+        }
+    }
+
+    // Indeterminate progress: a segment grows from the left, slides right and shrinks (≈ 1.1 s loop).
+    _startPulse() {
+        if (this._pulseId) return;
+        this._pulseStart = GLib.get_monotonic_time();
+        this._pulseId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 40, () => {
+            if (this.destroyed || !this.pulse) {
+                this._pulseId = 0;
+                return GLib.SOURCE_REMOVE;
+            }
+            const t = (((GLib.get_monotonic_time() - this._pulseStart) / 1000) % 1100) / 1100;
+            const L = this.applet.metrics.icon;
+            const head = 1 - Math.pow(1 - Math.min(1, t / 0.7), 3);
+            const tail = t < 0.3 ? 0 : Math.pow(Math.min(1, (t - 0.3) / 0.7), 3);
+            const a = Math.round(tail * L);
+            const b = Math.round(head * L);
+            this._placeFill(a, Math.max(2, b - a));
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _stopPulse() {
+        if (this._pulseId) {
+            GLib.source_remove(this._pulseId);
+            this._pulseId = 0;
+        }
+    }
+
+    // ------------------------------------------------------------------ badges
+
+    setBadge(count) {
+        if (count === this.badgeCount) return;
+        this.badgeCount = count;
+        this._showBadge();
+    }
+
+    _showBadge() {
+        const show = this.badgeCount > 0 && this.applet.showBadges && !this.dragging;
+        this.badge.visible = show;
+        if (show) this.badgeLabel.set_text(this.badgeCount > 99 ? '99+' : String(this.badgeCount));
+    }
+
+    // ------------------------------------------------------------------- flash
 
     _updateFlash() {
         if (this.attention && !this._flashing) {
@@ -238,7 +414,7 @@ class TaskButton {
     }
 
     _setPressed(pressed) {
-        if (this.destroyed) return;
+        if (this.destroyed || this.dragging) return;
         const target = pressed ? 0.85 : 1;
         if (this.iconBin.scale_x === target) return;
         this.iconBin.ease({
@@ -252,61 +428,113 @@ class TaskButton {
     // Launch feedback: the icon hops up a few pixels and settles.
     playLaunchBounce() {
         if (!this.applet.animate || !this.applet.launchAnimation || this.destroyed) return;
-        const lift = -this.applet.metrics.px(5);
+        const m = this.applet.metrics;
+        const prop = m.horizontal ? 'translation_y' : 'translation_x';
+        const lift = -m.px(5) * (m.side === St.Side.RIGHT ? -1 : 1);
+        const up = { duration: 160, mode: EASE_OUT };
+        up[prop] = m.horizontal ? -m.px(5) : lift;
+        up.onComplete = () => {
+            if (this.destroyed) return;
+            const down = { duration: 260, mode: Clutter.AnimationMode.EASE_OUT_BOUNCE };
+            down[prop] = 0;
+            this.iconBin.ease(down);
+        };
         this.iconBin.remove_all_transitions();
-        this.iconBin.ease({
-            translation_y: lift,
-            duration: 160,
-            mode: EASE_OUT,
-            onComplete: () => {
-                if (this.destroyed) return;
-                this.iconBin.ease({
-                    translation_y: 0,
-                    duration: 260,
-                    mode: Clutter.AnimationMode.EASE_OUT_BOUNCE,
-                });
-            },
-        });
+        this.iconBin.ease(up);
+    }
+
+    // ---------------------------------------------------------------- dragging
+
+    // While dragged, the real icon, tile and indicator are hidden and a floating icon is shown.
+    setDragging(on) {
+        this.dragging = on;
+        if (on) this.actor.add_style_pseudo_class('dragging');
+        else this.actor.remove_style_pseudo_class('dragging');
+        this.iconBin.remove_all_transitions();
+        this.iconBin.scale_x = 1;
+        this.iconBin.scale_y = 1;
+        this.iconBin.translation_x = 0;
+        this.iconBin.translation_y = 0;
+        this.iconBin.opacity = on ? 0 : 255;
+        this.tile.opacity = on ? 0 : 255;
+        this.back.opacity = on ? 0 : 255;
+        if (on) this.flash.opacity = 0;
+        this._showBadge();
+        this._applyProgress();
+        this._applyIndicator(false);
+    }
+
+    // Slides the button from `delta` px (along axis) away from its new layout position.
+    slideFrom(delta) {
+        if (!delta || this.destroyed) return;
+        const prop = this.applet.metrics.horizontal ? 'translation_x' : 'translation_y';
+        const cur = this.actor[prop] || 0;
+        this.actor.remove_transition(prop.replace('_', '-'));
+        this.actor[prop] = cur + delta;
+        if (!this.applet.animate) {
+            this.actor[prop] = 0;
+            return;
+        }
+        const t = { duration: 250, mode: EASE_CUBIC };
+        t[prop] = 0;
+        this.actor.ease(t);
     }
 
     // ---------------------------------------------------------------- lifetime
 
-    // Slides the button in from zero width.
+    // New button: the group recentres first, then the icon rises into place (see REFERENCE.md).
     animateIn() {
         if (!this.applet.animate) return;
         const m = this.applet.metrics;
+        const H = m.horizontal;
         this.actor.set_clip_to_allocation(true);
-        this.actor.set_width(0);
-        this.actor.opacity = 0;
-        this.actor.ease({
-            width: m.tileW,
-            opacity: 255,
-            duration: 180,
-            mode: EASE_OUT,
-            onComplete: () => {
-                if (!this.destroyed) this.actor.set_clip_to_allocation(false);
-            },
-        });
+        if (H) this.actor.set_width(0);
+        else this.actor.set_height(0);
+        this.iconBin.opacity = 0;
+        const grow = { duration: 180, mode: EASE_CUBIC };
+        if (H) grow.width = m.tileW;
+        else grow.height = m.tileH;
+        grow.onComplete = () => {
+            if (this.destroyed) return;
+            this.actor.set_clip_to_allocation(false);
+            const prop = H ? 'translation_y' : 'translation_x';
+            this.iconBin[prop] = H ? m.px(10) : (m.side === St.Side.RIGHT ? -m.px(10) : m.px(10));
+            const rise = { opacity: 255, duration: 160, mode: EASE_CUBIC };
+            rise[prop] = 0;
+            this.iconBin.ease(rise);
+        };
+        this.actor.ease(grow);
     }
 
+    // The icon drops and fades first, then the slot collapses.
     destroy(animated) {
         if (this.destroyed || this.removing) return;
         this._flashing = false;
+        this._stopPulse();
         const finish = () => {
             if (!this.destroyed) this.actor.destroy();
             this.destroyed = true;
         };
         if (animated && this.applet.animate) {
+            const m = this.applet.metrics;
+            const H = m.horizontal;
             this.removing = true;
             this.actor.set_reactive(false);
-            this.actor.set_clip_to_allocation(true);
-            this.actor.ease({
-                width: 0,
-                opacity: 0,
-                duration: 150,
-                mode: EASE_OUT,
-                onComplete: finish,
-            });
+            this.indicator.opacity = 0;
+            this.tile.opacity = 0;
+            this.back.opacity = 0;
+            const prop = H ? 'translation_y' : 'translation_x';
+            const drop = { opacity: 0, duration: 130, mode: EASE_CUBIC };
+            drop[prop] = H ? m.px(10) : (m.side === St.Side.RIGHT ? -m.px(10) : m.px(10));
+            drop.onComplete = () => {
+                if (this.destroyed) return;
+                this.actor.set_clip_to_allocation(true);
+                const shrink = { duration: 200, mode: EASE_CUBIC, onComplete: finish };
+                if (H) shrink.width = 0;
+                else shrink.height = 0;
+                this.actor.ease(shrink);
+            };
+            this.iconBin.ease(drop);
         } else {
             finish();
         }

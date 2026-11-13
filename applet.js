@@ -12,10 +12,56 @@ const { TaskButton } = require('./taskButton');
 const { Flyout } = require('./flyout');
 const { ContextMenu } = require('./contextMenu');
 const { TaskTip } = require('./tooltip');
+const { ReorderDrag } = require('./dragController');
+const { recentFor } = require('./recent');
+const Shared = require('./shared');
 
+const XDND_HOVER_DELAY = 1000;   // ms a dragged item must rest on a button before its window comes forward
 const TIP_DELAY = 700;           // ms before the text tooltip of a button without windows
+const BADGE_POLL_SECONDS = 2;
+const MIN_ICON = 16;
 const PIN_ICONS = ['view-pin-symbolic', 'pin-symbolic', 'emblem-pinned-symbolic'];
 const UNPIN_ICONS = ['view-unpin-symbolic', 'unpin-symbolic', 'view-pin-symbolic', 'pin-symbolic'];
+
+function sameList(a, b) {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+// Empty slot shown while an app from another widget (the Start menu) is dragged over the bar.
+class Placeholder {
+    constructor(applet) {
+        this.applet = applet;
+        this.destroyed = false;
+        this.actor = new St.Widget({ style_class: 'win11-tb-placeholder' });
+        this.actor._delegate = this;
+        const m = applet.metrics;
+        this.actor.set_size(m.horizontal ? 0 : m.tileW, m.horizontal ? m.tileH : 0);
+        this.actor.ease(m.horizontal
+            ? { width: m.tileW, duration: applet.animate ? 150 : 0, mode: Clutter.AnimationMode.EASE_OUT_CUBIC }
+            : { height: m.tileH, duration: applet.animate ? 150 : 0, mode: Clutter.AnimationMode.EASE_OUT_CUBIC });
+        if (!applet.animate) this.actor.set_size(m.tileW, m.tileH);
+    }
+
+    slideFrom(delta) {
+        TaskButton.prototype.slideFrom.call(this, delta);
+    }
+
+    remove(animated) {
+        if (this.destroyed) return;
+        const done = () => {
+            this.destroyed = true;
+            this.actor.destroy();
+        };
+        if (animated && this.applet.animate) {
+            const m = this.applet.metrics;
+            this.actor.set_reactive(false);
+            this.actor.ease(Object.assign(m.horizontal ? { width: 0 } : { height: 0 },
+                { duration: 150, mode: Clutter.AnimationMode.EASE_OUT_CUBIC, onComplete: done }));
+        } else {
+            done();
+        }
+    }
+}
 
 class Win11WindowList extends Applet.Applet {
     constructor(metadata, orientation, panelHeight, instanceId) {
@@ -30,17 +76,32 @@ class Win11WindowList extends Applet.Applet {
         this.appSystem = Cinnamon.AppSystem.get_default();
 
         this._buttons = new Map();      // id -> TaskButton
-        this._runOrder = [];            // ids of unpinned running apps, in display order
+        this._btnOrder = [];               // ids in display order (pinned and running mixed, like Windows)
         this._attention = new Set();    // MetaWindows asking for attention
         this._mru = [];                 // most recently focused first
         this._wsig = new Map();         // MetaWindow -> signal ids
         this._gsig = [];                // [object, id]
         this._refreshId = 0;
         this._statesId = 0;
+        this._badgeId = 0;
         this._hoverButton = null;
         this._flyoutTimer = new Timer();
         this._tipTimer = new Timer();
+        this._drag = null;              // active ReorderDrag
         this._dragging = false;
+        this._refreshDeferred = false;
+        this._synced = false;
+        this._hotkeyOwner = false;
+        this._placeholder = null;
+        this._placeholderId = null;
+        this._groups = null;
+        this._launcher = new Map();      // desktop id -> Unity LauncherEntry data (count, progress, urgent)
+        this._launcherSub = 0;
+        this._xdndHover = null;
+        this._xdndTimer = new Timer();
+        this._xdndEndId = 0;
+        this._xdndBeginId = 0;
+        this._xdndPollId = 0;
 
         this.setAllowedLayout(Applet.AllowedLayout.BOTH);
         this.actor.set_track_hover(false);
@@ -55,9 +116,13 @@ class Win11WindowList extends Applet.Applet {
             vertical: !this._horizontal(),
             x_expand: true,
             y_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this.actor.add_child(this.box);
+        // The panel can allocate its applets more room than the bar; keep the buttons centred in the bar.
+        this.actor.connect('notify::allocation', () => this._centerInPanel());
+        this.actor.connect('notify::mapped', () => this._centerInPanel());
 
         this.flyout = new Flyout(this);
         this.menu = new ContextMenu(this);
@@ -75,14 +140,20 @@ class Win11WindowList extends Applet.Applet {
         s.bindProperty(BOTH, 'pinned-imported', 'pinnedImported', null);
         s.bindProperty(IN, 'show-all-workspaces', 'showAllWorkspaces', () => this._queueRefresh());
         s.bindProperty(IN, 'show-all-monitors', 'showAllMonitors', () => this._queueRefresh());
-        s.bindProperty(IN, 'super-num-hotkeys', 'superNumHotkeys', () => this._bindHotkeys());
-        s.bindProperty(IN, 'icon-size', 'iconSize', () => this._onMetricsChanged());
+        s.bindProperty(IN, 'sync-monitors', 'syncMonitors', () => this._applySync());
+        s.bindProperty(IN, 'super-num-hotkeys', 'superNumHotkeys', () => this._applyHotkeys());
+        s.bindProperty(IN, 'icon-size-mode', 'iconSizeMode', () => this._onMetricsChanged());
+        s.bindProperty(BOTH, 'icon-size', 'iconSize', () => this._onMetricsChanged());
         s.bindProperty(IN, 'indicator-color', 'accentColor', () => this._queueStates());
         s.bindProperty(IN, 'hover-delay', 'hoverDelay', null);
         s.bindProperty(IN, 'enable-peek', 'enablePeek', null);
         s.bindProperty(IN, 'peek-delay', 'peekDelay', null);
         s.bindProperty(IN, 'enable-animations', 'enableAnimations', null);
         s.bindProperty(IN, 'launch-animation', 'launchAnimation', null);
+        s.bindProperty(IN, 'show-badges', 'showBadges', () => this._updateBadges());
+        s.bindProperty(IN, 'show-progress', 'showProgress', () => this._queueStates());
+        s.bindProperty(IN, 'show-recent', 'showRecent', null);
+        s.bindProperty(IN, 'recent-count', 'recentCount', null);
     }
 
     get animate() {
@@ -93,33 +164,71 @@ class Win11WindowList extends Applet.Applet {
         return this.orientation === St.Side.TOP || this.orientation === St.Side.BOTTOM;
     }
 
+    // Panel thickness (the "taskbar size"), the ceiling for icons.
+    _thickness() {
+        const scale = global.ui_scale || 1;
+        const h = this.panel ? this.panel.height : this.panel_height;
+        return h || Math.round(48 * scale);
+    }
+
+    // Auto mode keeps Windows' proportions (24 px icon in a 40 px tile on a 48 px bar) and scales with the
+    // bar; manual mode takes the chosen size. Either way the icon never exceeds the bar size and never
+    // drops under MIN_ICON, so it cannot vanish.
     _computeMetrics() {
         const scale = global.ui_scale || 1;
         const px = n => Math.round(n * scale);
-        const panelH = this.panel_height || px(48);
-        const tileH = Math.min(px(40), Math.max(px(24), panelH - px(4)));
-        const tileW = panelH >= px(44) ? px(40) : tileH;
+        const horizontal = this._horizontal();
+        const thickness = this._thickness();
+        const minIcon = px(MIN_ICON);
+        const wanted = this.iconSizeMode === 'manual' ? px(this.iconSize || 24) : Math.round(thickness / 2);
+        const icon = Math.max(minIcon, Math.min(wanted, Math.max(minIcon, thickness)));
+        // Square tiles: icon plus 8 px each side, never larger than the bar.
+        const tile = Math.min(icon + px(16), Math.max(thickness, icon));
         this.metrics = {
             px: px,
-            tileW: tileW,
-            tileH: tileH,
-            icon: Math.min(px(this.iconSize || 24), tileH - px(6)),
+            horizontal: horizontal,
+            side: this.orientation,
+            thickness: thickness,
+            icon: icon,
+            tileW: tile,
+            tileH: tile,
             backW: px(3),
             stackInset: px(5),
             indicatorIdle: px(6),
             indicatorActive: px(16),
             indicatorH: px(3),
-            indicatorBottom: px(1),
+            indicatorEdge: px(1),
             gap: px(4),
         };
     }
 
     _onMetricsChanged() {
+        if (this.destroyed || !this.box) return;
+        // Keep a manual size inside the allowed range (the setting shows what is really used).
+        if (this.iconSizeMode === 'manual') {
+            const cap = Math.max(MIN_ICON, this._thickness());
+            const fixed = Math.max(MIN_ICON, Math.min(this.iconSize, cap));
+            if (fixed !== this.iconSize) this.iconSize = fixed;
+        }
         this._computeMetrics();
         this._buttons.forEach(b => {
             b.applyMetrics();
             b.buildIcon();
         });
+        this.flyout.close(true);
+    }
+
+    _centerInPanel() {
+        if (this.destroyed || !this.panel || !this.box || !this.box.get_stage()) return;
+        const H = this._horizontal();
+        const [px, py] = this.panel.actor.get_transformed_position();
+        const [pw, ph] = this.panel.actor.get_transformed_size();
+        const [bx, by] = this.box.get_transformed_position();
+        const [bw, bh] = this.box.get_transformed_size();
+        const delta = H ? (py + ph / 2) - (by + bh / 2) : (px + pw / 2) - (bx + bw / 2);
+        if (Math.abs(delta) < 0.5) return;
+        const prop = H ? 'translation_y' : 'translation_x';
+        this.box[prop] = Math.round(this.box[prop] + delta);
     }
 
     // -------------------------------------------------------------- applet hooks
@@ -128,9 +237,16 @@ class Win11WindowList extends Applet.Applet {
         this._importPinned();
         this._connectGlobals();
         global.display.list_windows(0).forEach(w => this._watchWindow(w));
+        this._applySync(true);
+        this._subscribeLauncher();
+        this._subscribeXdnd();
         this._refresh(true);
         this.ready = true;
         this._bindHotkeys();
+        this._badgeId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, BADGE_POLL_SECONDS, () => {
+            this._updateBadges();
+            return this.destroyed ? GLib.SOURCE_REMOVE : GLib.SOURCE_CONTINUE;
+        });
     }
 
     on_applet_removed_from_panel() {
@@ -146,6 +262,7 @@ class Win11WindowList extends Applet.Applet {
         if (this.box) this.box.set_vertical(!this._horizontal());
         this.flyout.close(true);
         this.menu.close(true);
+        this._onMetricsChanged();
     }
 
     on_panel_icon_size_changed() {
@@ -155,13 +272,26 @@ class Win11WindowList extends Applet.Applet {
     _destroy() {
         if (this.destroyed) return;
         this.destroyed = true;
+        if (this._drag) this._drag.abort();
         this._flyoutTimer.clear();
         this._tipTimer.clear();
-        if (this._refreshId) GLib.source_remove(this._refreshId);
-        if (this._statesId) GLib.source_remove(this._statesId);
-        this._refreshId = 0;
-        this._statesId = 0;
+        this._xdndTimer.clear();
+        if (this._launcherSub) Gio.DBus.session.signal_unsubscribe(this._launcherSub);
+        this._launcherSub = 0;
+        if (this._xdndEndId && Main.xdndHandler) Main.xdndHandler.disconnect(this._xdndEndId);
+        if (this._xdndBeginId && Main.xdndHandler) Main.xdndHandler.disconnect(this._xdndBeginId);
+        this._xdndBeginId = 0;
+        if (this._xdndPollId) GLib.source_remove(this._xdndPollId);
+        this._xdndPollId = 0;
+        this._xdndEndId = 0;
+        [this._refreshId, this._statesId, this._badgeId].forEach(id => {
+            if (id) GLib.source_remove(id);
+        });
+        this._refreshId = this._statesId = this._badgeId = 0;
         this._unbindHotkeys();
+        Shared.hotkeyUnregister(this);
+        if (this._synced) Shared.leave(this);
+        this._synced = false;
         this._gsig.forEach(([obj, id]) => {
             try {
                 obj.disconnect(id);
@@ -172,6 +302,7 @@ class Win11WindowList extends Applet.Applet {
         this.flyout.destroy();
         this.menu.destroy();
         this.tip.destroy();
+        if (this._placeholder) this._placeholder.remove(false);
         this._buttons.forEach(b => b.destroy(false));
         this._buttons.clear();
         if (this.settings) this.settings.finalize();
@@ -203,10 +334,10 @@ class Win11WindowList extends Applet.Applet {
         } catch (e) { /* no grouped window list settings: start empty */ }
     }
 
-    _pinnedIds() {
+    _uniq(list) {
         const seen = new Set();
         const out = [];
-        (this.pinnedApps || []).forEach(id => {
+        (list || []).forEach(id => {
             const n = normalizeId(id);
             if (!seen.has(n)) {
                 seen.add(n);
@@ -214,6 +345,45 @@ class Win11WindowList extends Applet.Applet {
             }
         });
         return out;
+    }
+
+    // Pinned apps in order: this instance's own list, or the shared one when monitors are synchronised.
+    _pinnedIds() {
+        return this._uniq(this._synced ? Shared.snapshot().pinned : this.pinnedApps);
+    }
+
+    // ----------------------------------------------------- monitor synchronisation
+
+    _applySync(initial) {
+        if (this.destroyed) return;
+        const want = !!this.syncMonitors;
+        if (want && !this._synced) {
+            const snap = Shared.join(this, this._uniq(this.pinnedApps), this._btnOrder);
+            this._synced = true;
+            this.pinnedApps = snap.pinned;
+            if (snap.order.length) this._btnOrder = snap.order;
+        } else if (!want && this._synced) {
+            const snap = Shared.snapshot();
+            Shared.leave(this);
+            this._synced = false;
+            this.pinnedApps = snap.pinned;
+            this._btnOrder = snap.order;
+        }
+        if (!initial) this._queueRefresh();
+    }
+
+    // Another synchronised instance changed pins or order.
+    onSharedChanged() {
+        if (this.destroyed || !this._synced) return;
+        const snap = Shared.snapshot();
+        this.pinnedApps = snap.pinned;
+        this._btnOrder = snap.order.slice();
+        this._queueRefresh();
+    }
+
+    _savePinned(ids) {
+        this.pinnedApps = ids;
+        if (this._synced) Shared.publish(this, ids, this._btnOrder);
     }
 
     // ------------------------------------------------------------ signal wiring
@@ -242,7 +412,11 @@ class Win11WindowList extends Applet.Applet {
     _watchWindow(w) {
         if (!w || this._wsig.has(w)) return;
         const ids = [];
-        const c = (name, cb) => ids.push(w.connect(name, cb));
+        const c = (name, cb) => {
+            try {
+                ids.push(w.connect(name, cb));
+            } catch (e) { /* property missing */ }
+        };
         c('unmanaged', () => {
             this._unwatchWindow(w);
             this._attention.delete(w);
@@ -256,6 +430,8 @@ class Win11WindowList extends Applet.Applet {
         c('notify::wm-class', () => this._queueRefresh());
         c('notify::gtk-application-id', () => this._queueRefresh());
         c('notify::demands-attention', () => this._onAttention(w));
+        c('notify::progress', () => this._queueStates());
+        c('notify::progress-pulse', () => this._queueStates());
         this._wsig.set(w, ids);
     }
 
@@ -306,7 +482,6 @@ class Win11WindowList extends Applet.Applet {
     _onAttention(w) {
         if (!w || this._isFocused(w)) return;
         if (w.demands_attention === false && !this._attention.has(w)) {
-            // Property cleared: nothing to flash.
             this._queueStates();
             return;
         }
@@ -322,7 +497,8 @@ class Win11WindowList extends Applet.Applet {
             const ws = w.get_workspace();
             if (ws !== global.workspace_manager.get_active_workspace()) return false;
         }
-        if (!this.showAllMonitors && this.panel && w.get_monitor() !== this.panel.monitorIndex) return false;
+        // Synchronised bars all show every window.
+        if (!this._synced && !this.showAllMonitors && this.panel && w.get_monitor() !== this.panel.monitorIndex) return false;
         return true;
     }
 
@@ -344,8 +520,48 @@ class Win11WindowList extends Applet.Applet {
         return { id: 'win:' + cls, app: app || null, backed: true };
     }
 
+    // Display order: what is already shown keeps its place (pinned and running apps mix freely, as on
+    // Windows); a newly pinned app goes after the nearest earlier pinned one, a new window's app goes last.
+    _computeOrder(groups, pinnedAll, apps) {
+        const pinned = pinnedAll.filter(id => apps.get(id));
+        const wanted = new Set(pinned);
+        groups.forEach((g, id) => wanted.add(id));
+        const base = this._synced ? Shared.snapshot().order : this._btnOrder;
+        const order = base.filter(id => wanted.has(id));
+        const present = new Set(order);
+
+        pinned.forEach((id, i) => {
+            if (present.has(id)) return;
+            let at = -1;
+            for (let j = i - 1; j >= 0 && at < 0; j--) {
+                const k = order.indexOf(pinned[j]);
+                if (k >= 0) at = k + 1;
+            }
+            if (at < 0) {
+                let first = -1;
+                for (let j = i + 1; j < pinned.length && first < 0; j++) first = order.indexOf(pinned[j]);
+                at = first >= 0 ? first : 0;
+            }
+            order.splice(at, 0, id);
+            present.add(id);
+        });
+
+        Array.from(groups.values())
+            .filter(g => !present.has(g.id))
+            .sort((a, b) => a.windows[0].get_stable_sequence() - b.windows[0].get_stable_sequence())
+            .forEach(g => {
+                order.push(g.id);
+                present.add(g.id);
+            });
+        return order;
+    }
+
     _refresh(initial) {
         if (this.destroyed) return;
+        if (this._dragging) {            // do not fight a drag in progress; redo it afterwards
+            this._refreshDeferred = true;
+            return;
+        }
         const groups = new Map();
         global.display.list_windows(0).forEach(w => {
             if (!this._accepts(w)) return;
@@ -360,28 +576,20 @@ class Win11WindowList extends Applet.Applet {
         });
         groups.forEach(g => g.windows.sort((a, b) => a.get_stable_sequence() - b.get_stable_sequence()));
 
-        // Display order: pinned (saved order), then unpinned running apps.
         const pinned = this._pinnedIds();
-        const pinnedSet = new Set(pinned);
-        const order = [];
         const apps = new Map();
         pinned.forEach(id => {
             const g = groups.get(id);
             const app = (g && g.app) || this.appSystem.lookup_app(id);
-            if (!app) return; // desktop file is gone; keep the pin, show nothing
-            apps.set(id, app);
-            order.push(id);
+            if (app) apps.set(id, app);
+        });
+        groups.forEach((g, id) => {
+            if (!apps.has(id)) apps.set(id, g.app);
         });
 
-        this._runOrder = this._runOrder.filter(id => groups.has(id) && !pinnedSet.has(id));
-        const firstSeen = Array.from(groups.values())
-            .filter(g => !pinnedSet.has(g.id) && !this._runOrder.includes(g.id))
-            .sort((a, b) => a.windows[0].get_stable_sequence() - b.windows[0].get_stable_sequence());
-        firstSeen.forEach(g => this._runOrder.push(g.id));
-        this._runOrder.forEach(id => {
-            apps.set(id, groups.get(id).app);
-            order.push(id);
-        });
+        const order = this._computeOrder(groups, pinned, apps);
+        this._btnOrder = order;
+        if (this._synced && !sameList(order, Shared.snapshot().order)) Shared.publish(this, pinned, order);
 
         // Reconcile buttons.
         const wanted = new Set(order);
@@ -393,27 +601,37 @@ class Win11WindowList extends Applet.Applet {
             this._buttons.delete(id);
         });
 
-        order.forEach((id, i) => {
+        order.forEach(id => {
             let btn = this._buttons.get(id);
             const g = groups.get(id);
             const app = apps.get(id);
             if (!btn) {
                 btn = this._createButton(id, app, g ? g.title : id);
                 this._buttons.set(id, btn);
-                this.box.insert_child_at_index(btn.actor, i);
-                if (!initial) btn.animateIn();
-            } else {
-                if (app && btn.app !== app) {
-                    btn.app = app;
-                    btn.buildIcon();
+                const taken = this._takePlaceholder(id, btn);
+                if (!taken) {
+                    this.box.add_child(btn.actor);
+                    if (!initial) btn.animateIn();
                 }
-                if (this.box.get_child_at_index(i) !== btn.actor) this.box.set_child_at_index(btn.actor, i);
+            } else if (app && btn.app !== app) {
+                btn.app = app;
+                btn.buildIcon();
             }
         });
+        this._restack(order.map(id => this._buttons.get(id)));
 
         this._groups = groups;
         this._applyStates();
+        this._updateBadges();
         this.flyout.sync();
+    }
+
+    // Puts the live buttons in `list` order at the end of the box (collapsing ones stay in front).
+    _restack(list) {
+        const kids = this.box.get_children();
+        const same = list.length > 0 && list.every((b, i) => kids[kids.length - list.length + i] === b.actor);
+        if (same) return;
+        list.forEach(b => this.box.set_child_above_sibling(b.actor, null));
     }
 
     _applyStates() {
@@ -423,12 +641,37 @@ class Win11WindowList extends Applet.Applet {
             const g = this._groups.get(id);
             const windows = g ? g.windows : [];
             const focused = windows.some(w => this._isFocused(w));
-            const attention = !focused && windows.some(w => this._attention.has(w));
+            const lau = this._launcherFor(btn, windows);
+            const attention = !focused && (!!(lau && lau.urgent) || windows.some(w => this._attention.has(w)));
+            let progress = lau && lau.progressVisible ? Math.round(lau.progress * 100) : -1;
+            let pulse = false;
+            windows.forEach(w => {
+                if (w.progress_pulse) pulse = true;
+                if (typeof w.progress === 'number' && w.progress > progress) progress = w.progress;
+            });
             btn.update(windows, pinned.has(id), focused, attention);
+            btn.setProgress(progress, pulse);
         });
     }
 
-    _liveButtons() {
+    _updateBadges() {
+        if (this.destroyed) return;
+        this._buttons.forEach(btn => {
+            let count = 0;
+            if (this.showBadges && btn.app) {
+                try {
+                    count = Main.notificationDaemon.getNotificationCountForApp(btn.app) || 0;
+                } catch (e) {
+                    count = 0;
+                }
+                const l = this._launcherFor(btn);
+                if (l && l.countVisible) count = Math.max(count, l.count);
+            }
+            btn.setBadge(count);
+        });
+    }
+
+    liveButtons() {
         return this.box.get_children()
             .map(a => a._delegate)
             .filter(b => b instanceof TaskButton && !b.removing);
@@ -445,20 +688,158 @@ class Win11WindowList extends Applet.Applet {
 
     _createButton(id, app, fallbackName) {
         const btn = new TaskButton(this, id, app, fallbackName);
-        btn.draggable = DND.makeDraggable(btn.actor, { restoreOnSuccess: false });
-        btn.draggable.connect('drag-begin', () => {
-            this._dragging = true;
-            this._cancelHover();
-            this.flyout.close(true);
-            this.menu.close(true);
-            btn.actor.opacity = 110;
-        });
-        btn.draggable.connect('drag-end', () => {
-            this._dragging = false;
-            if (!btn.destroyed) btn.actor.opacity = 255;
-            this._queueRefresh();
+        btn.actor.connect('button-press-event', (a, event) => {
+            if (event.get_button() !== 1 || btn.removing || this._drag || this.menu.isOpen) {
+                return Clutter.EVENT_PROPAGATE;
+            }
+            this._drag = new ReorderDrag(this, btn, event);
+            return Clutter.EVENT_PROPAGATE;
         });
         return btn;
+    }
+
+    // ---------------------------------------------------------------- drag hooks
+
+    beginDrag(btn) {
+        this._dragging = true;
+        this._cancelHover();
+        this.flyout.close(true);
+        this.menu.close(true);
+    }
+
+    dragFinished(drag) {
+        if (this._drag === drag) this._drag = null;
+        this._dragging = false;
+        if (this._refreshDeferred) {
+            this._refreshDeferred = false;
+            this._queueRefresh();
+        }
+    }
+
+    // Moves a live button to `slot` (index among live buttons) and slides the ones it passes.
+    moveButton(btn, slot) {
+        const items = this._slotItems();
+        const from = items.indexOf(btn);
+        if (from < 0 || slot === from) return;
+        this._moveItem(items, from, slot);
+    }
+
+    _slotItems() {
+        return this.box.get_children()
+            .map(a => a._delegate)
+            .filter(b => (b instanceof TaskButton && !b.removing) || b instanceof Placeholder);
+    }
+
+    _moveItem(items, from, to) {
+        const m = this.metrics;
+        const pitch = (m.horizontal ? m.tileW : m.tileH) + m.gap;
+        const next = items.slice();
+        const [it] = next.splice(from, 1);
+        next.splice(to, 0, it);
+        next.forEach(b => this.box.set_child_above_sibling(b.actor, null));
+        next.forEach((b, i) => {
+            if (b === it) return;
+            const old = items.indexOf(b);
+            if (old !== i) b.slideFrom((old - i) * pitch);
+        });
+    }
+
+    // The order on screen becomes the saved order (pinned apps keep their relative order).
+    commitOrder() {
+        const order = this.liveButtons().map(b => b.id);
+        this._btnOrder = order;
+        this._savePinnedFromOrder(this._pinnedIds());
+    }
+
+    _savePinnedFromOrder(pinnedIds) {
+        const set = new Set(pinnedIds);
+        const shown = this._btnOrder.filter(id => set.has(id));
+        const hidden = pinnedIds.filter(id => !shown.includes(id));
+        this._savePinned(shown.concat(hidden));
+    }
+
+    // ------------------------------------------- Unity LauncherEntry (counts, progress, urgent)
+    // Linux's counterpart of the Windows taskbar overlay badge and progress bar: apps such as Chrome,
+    // Telegram or Nemo publish them on the session bus as com.canonical.Unity.LauncherEntry.Update.
+
+    _subscribeLauncher() {
+        this._launcherSub = Gio.DBus.session.signal_subscribe(null, 'com.canonical.Unity.LauncherEntry', 'Update',
+            null, null, Gio.DBusSignalFlags.NONE, (conn, sender, path, iface, name, params) => {
+                try {
+                    const [uri, props] = params.deep_unpack();
+                    const id = normalizeId(String(uri).replace(/^application:\/\//, ''));
+                    const cur = this._launcher.get(id) || { count: 0, countVisible: false, progress: 0, progressVisible: false, urgent: false };
+                    const v = k => (props[k] !== undefined ? props[k].deep_unpack() : undefined);
+                    if (v('count') !== undefined) cur.count = Number(v('count'));
+                    if (v('count-visible') !== undefined) cur.countVisible = !!v('count-visible');
+                    if (v('progress') !== undefined) cur.progress = Number(v('progress'));
+                    if (v('progress-visible') !== undefined) cur.progressVisible = !!v('progress-visible');
+                    if (v('urgent') !== undefined) cur.urgent = !!v('urgent');
+                    this._launcher.set(id, cur);
+                    this._queueStates();
+                } catch (e) {
+                    global.logError('win11-window-list: bad LauncherEntry update: ' + e);
+                }
+            });
+    }
+
+    _launcherFor(btn, windows = btn.windows) {
+        if (!windows.length) return null;            // data of a closed app is stale
+        return this._launcher.get(btn.id) || (btn.app ? this._launcher.get(normalizeId(btn.app.get_id())) : null) || null;
+    }
+
+    // ------------------------------------- dragging files (from other windows) over the buttons
+    // Like Windows, holding a dragged item over a button for a moment brings that app's window forward
+    // so the item can be dropped into it. Cinnamon cannot receive the drop itself.
+
+    // Cinnamon's XdndHandler does not hand positions to chrome actors (it picks with PickMode.NONE), so
+    // while a drag from another window is running the pointer is polled instead.
+    _subscribeXdnd() {
+        if (!Main.xdndHandler) return;
+        this._xdndBeginId = Main.xdndHandler.connect('drag-begin', () => this._xdndStart());
+        this._xdndEndId = Main.xdndHandler.connect('drag-end', () => this._xdndLeave());
+    }
+
+    _xdndStart() {
+        if (this._xdndPollId || this.destroyed) return;
+        this._xdndPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+            if (this.destroyed) {
+                this._xdndPollId = 0;
+                return GLib.SOURCE_REMOVE;
+            }
+            const [x, y] = global.get_pointer();
+            this._xdndOver(x, y);
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _xdndLeave() {
+        if (this._xdndPollId) GLib.source_remove(this._xdndPollId);
+        this._xdndPollId = 0;
+        this._xdndTimer.clear();
+        this._xdndHover = null;
+        if (this.flyout.isOpen && !this.flyout.sticky) this.flyout.close(true);
+    }
+
+    _buttonAt(x, y) {
+        return this.liveButtons().find(b => {
+            const [bx, by] = b.actor.get_transformed_position();
+            const [bw, bh] = b.actor.get_transformed_size();
+            return x >= bx && x < bx + bw && y >= by && y < by + bh;
+        }) || null;
+    }
+
+    _xdndOver(stageX, stageY) {
+        const btn = this._buttonAt(stageX, stageY);
+        if (btn === this._xdndHover) return;
+        this._xdndTimer.clear();
+        this._xdndHover = btn;
+        if (!btn || btn.windows.length === 0) return;
+        this._xdndTimer.set(XDND_HOVER_DELAY, () => {
+            if (this._xdndHover !== btn || btn.destroyed) return;
+            if (btn.windows.length === 1) this.activateWindow(btn.windows[0]);
+            else this.flyout.open(btn, true);
+        });
     }
 
     // ---------------------------------------------------------------- hover logic
@@ -568,15 +949,12 @@ class Win11WindowList extends Applet.Applet {
         if (!btn.app || btn.id.startsWith('win:')) return;
         const ids = this._pinnedIds();
         if (!ids.includes(btn.id)) ids.push(btn.id);
-        this._runOrder = this._runOrder.filter(id => id !== btn.id);
-        this.pinnedApps = ids;
+        this._savePinnedFromOrder(ids);
         this._queueRefresh();
     }
 
     unpin(btn) {
-        const ids = this._pinnedIds().filter(id => id !== btn.id);
-        if (btn.windows.length && !this._runOrder.includes(btn.id)) this._runOrder.unshift(btn.id);
-        this.pinnedApps = ids;
+        this._savePinnedFromOrder(this._pinnedIds().filter(id => id !== btn.id));
         this._queueRefresh();
     }
 
@@ -588,10 +966,39 @@ class Win11WindowList extends Applet.Applet {
         return name ? new St.Icon({ icon_name: name, icon_size: this.metrics.px(16), style_class: 'win11-tb-menu-icon' }) : null;
     }
 
+    _openRecent(btn, uri) {
+        const app = btn.app;
+        try {
+            const info = app && app.get_app_info();
+            if (info) {
+                info.launch_uris([uri], global.create_app_launch_context(0, -1));
+                return;
+            }
+        } catch (e) { /* fall back below */ }
+        try {
+            Gio.AppInfo.launch_default_for_uri(uri, global.create_app_launch_context(0, -1));
+        } catch (e) {
+            global.logError('win11-window-list: cannot open ' + uri + ': ' + e);
+        }
+    }
+
     _menuItems(btn) {
         const items = [];
         const app = btn.app;
         const info = app ? app.get_app_info() : null;
+
+        const recents = this.showRecent && app ? recentFor(app, this.recentCount) : [];
+        if (recents.length) {
+            items.push({ kind: 'header', label: tr('recent') });
+            recents.forEach(r => items.push({
+                kind: 'item',
+                label: r.name,
+                icon: new St.Icon({ gicon: r.gicon, icon_size: this.metrics.px(16), style_class: 'win11-tb-menu-icon' }),
+                ellipsize: true,
+                activate: () => this._openRecent(btn, r.uri),
+            }));
+            items.push({ kind: 'separator' });
+        }
 
         if (info && typeof info.list_actions === 'function') {
             const actions = info.list_actions();
@@ -652,11 +1059,25 @@ class Win11WindowList extends Applet.Applet {
         }
     }
 
+    isOnPrimary() {
+        return !!this.panel && this.panel.monitorIndex === Main.layoutManager.primaryIndex;
+    }
+
+    // Called by Shared when the instance that answers Super+N changes.
+    setHotkeyOwner(owner) {
+        this._hotkeyOwner = owner;
+        this._applyHotkeys();
+    }
+
     _bindHotkeys() {
+        if (!this.panel) return;
+        Shared.hotkeyRegister(this);
+        this._applyHotkeys();
+    }
+
+    _applyHotkeys() {
         this._unbindHotkeys();
-        if (!this.superNumHotkeys || !this.panel) return;
-        // One panel per desktop answers the keys: the one on the primary monitor.
-        if (this.panel.monitorIndex !== Main.layoutManager.primaryIndex) return;
+        if (!this.superNumHotkeys || !this._hotkeyOwner || this.destroyed) return;
         for (let i = 1; i < 10; i++) {
             const n = i;
             Main.keybindingManager.addHotKey('win11tb-key-' + this.instanceId + '-' + n, '<Super>' + n,
@@ -667,45 +1088,103 @@ class Win11WindowList extends Applet.Applet {
     }
 
     _onNumberKey(n, fresh) {
-        const btn = this._liveButtons()[n - 1];
+        const btn = this.liveButtons()[n - 1];
         if (!btn) return;
         if (fresh) this.newWindow(btn);
         else this.activateButton(btn);
     }
 
-    // ------------------------------------------------------------- drag and drop
+    // ------------------------------------- apps dragged in from other widgets (Start menu)
+
+    _foreignAppId(source) {
+        if (!source || source instanceof TaskButton || source === Main.xdndHandler) return null;
+        try {
+            if (source.isDraggableApp && typeof source.get_app_id === 'function') return normalizeId(source.get_app_id());
+            if (typeof source.getId === 'function') return normalizeId(source.getId());
+            if (source.app && typeof source.app.get_id === 'function') return normalizeId(source.app.get_id());
+            if (source.itemData && source.itemData.type !== 'folder' && source.itemData.id) return normalizeId(source.itemData.id);
+        } catch (e) { /* not an app */ }
+        return null;
+    }
+
+    // Insertion index (among live buttons) for a pointer position along the bar: the number of
+    // buttons whose centre lies before the pointer. Uses layout positions (no slide offset), so it
+    // does not move when the centred group grows by the placeholder.
+    _insertionIndex(x, y) {
+        const H = this.metrics.horizontal;
+        const [ax, ay] = this.actor.get_transformed_position();
+        const pointer = H ? ax + x : ay + y;
+        let count = 0;
+        this.liveButtons().forEach(b => {
+            const [bx, by] = b.actor.get_transformed_position();
+            const [bw, bh] = b.actor.get_transformed_size();
+            const centre = H ? bx - (b.actor.translation_x || 0) + bw / 2 : by - (b.actor.translation_y || 0) + bh / 2;
+            if (centre < pointer) count++;
+        });
+        return Math.max(0, Math.min(this.liveButtons().length, count));
+    }
 
     handleDragOver(source, actor, x, y, time) {
-        if (!(source instanceof TaskButton)) return DND.DragMotionResult.CONTINUE;
-        const horizontal = this._horizontal();
-        // The DND code hands over coordinates relative to the applet actor.
-        const [ax, ay] = this.actor.get_transformed_position();
-        const [bx, by] = this.box.get_transformed_position();
-        const pos = horizontal ? ax + x - bx : ay + y - by;
-        const m = this.metrics;
-        const pitch = (horizontal ? m.tileW : m.tileH) + m.gap;
+        const id = this._foreignAppId(source);
+        if (!id) return DND.DragMotionResult.CONTINUE;
+        if (this._pinnedIds().includes(id) || !this.appSystem.lookup_app(id)) return DND.DragMotionResult.CONTINUE;
 
-        const others = this._liveButtons().filter(b => b !== source);
-        const pinnedCount = others.filter(b => b.pinned).length;
-        // The slot under the pointer in the current layout (the dragged button still occupies one).
-        let idx = Math.max(0, Math.min(others.length, Math.floor(pos / pitch)));
-        idx = source.pinned ? Math.min(idx, pinnedCount) : Math.max(idx, pinnedCount);
+        const existing = this._buttons.get(id);
+        if (existing) return DND.DragMotionResult.COPY_DROP;      // running, not pinned: pinning keeps its place
 
-        const next = others.slice();
-        next.splice(idx, 0, source);
-        next.forEach((b, i) => {
-            if (this.box.get_child_at_index(i) !== b.actor) this.box.set_child_at_index(b.actor, i);
-        });
-        return DND.DragMotionResult.MOVE_DROP;
+        const idx = this._insertionIndex(x, y);
+        if (!this._placeholder) {
+            this._placeholder = new Placeholder(this);
+            this._placeholderId = id;
+            this.box.add_child(this._placeholder.actor);
+            const items = this._slotItems();
+            this._moveItem(items, items.length - 1, Math.min(idx, items.length - 1));
+        } else {
+            const items = this._slotItems();
+            const from = items.indexOf(this._placeholder);
+            if (from >= 0 && from !== idx) this._moveItem(items, from, Math.min(idx, items.length - 1));
+        }
+        return DND.DragMotionResult.COPY_DROP;
+    }
+
+    handleDragOut() {
+        if (!this._placeholder) return;
+        this._placeholder.remove(true);
+        this._placeholder = null;
+        this._placeholderId = null;
     }
 
     acceptDrop(source, actor, x, y, time) {
-        if (!(source instanceof TaskButton)) return false;
-        const ordered = this._liveButtons();
-        const shown = ordered.filter(b => b.pinned).map(b => b.id);
-        const hidden = this._pinnedIds().filter(id => !shown.includes(id));
-        this._runOrder = ordered.filter(b => !b.pinned).map(b => b.id);
-        this.pinnedApps = shown.concat(hidden);
+        const id = this._foreignAppId(source);
+        if (!id || !this.appSystem.lookup_app(id)) return false;
+        const pinned = this._pinnedIds();
+        if (pinned.includes(id)) return false;
+
+        const items = this._slotItems();
+        let index = this._placeholder ? items.indexOf(this._placeholder) : -1;
+        const live = items.filter(b => b instanceof TaskButton).map(b => b.id);
+        if (index < 0) index = live.length;
+        // Position among real buttons = placeholder index (the placeholder is not in `live`).
+        const order = live.filter(v => v !== id);
+        const slot = this._placeholder ? items.slice(0, index).filter(b => b instanceof TaskButton).length : (live.indexOf(id) >= 0 ? live.indexOf(id) : order.length);
+        order.splice(Math.min(slot, order.length), 0, id);
+        this._btnOrder = order;
+        this._savePinnedFromOrder(pinned.concat([id]));
+        this._queueRefresh();
+        return true;
+    }
+
+    // A new button takes over the placeholder's slot without a second animation.
+    _takePlaceholder(id, btn) {
+        const ph = this._placeholder;
+        if (!ph || this._placeholderId !== id) return false;
+        const kids = this.box.get_children();
+        const at = kids.indexOf(ph.actor);
+        this._placeholder = null;
+        this._placeholderId = null;
+        this.box.insert_child_at_index(btn.actor, at);
+        ph.destroyed = true;
+        ph.actor.destroy();
         return true;
     }
 }
