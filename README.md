@@ -46,7 +46,8 @@ Then add **Win11-Like Window List** from *System Settings → Applets*. Remove o
 | File | Role |
 |---|---|
 | `applet.js` | applet, window tracking, pinning, hotkeys, drag and drop |
-| `taskButton.js` | one button: tile, icon, indicator, progress, badge, attention flash |
+| `taskButton.js` | one button: icon, indicator, progress, badge, attention flash |
+| `tileArt.js` | the tile behind a button (fill + 1 px border per state) and the stacked back page of apps with several windows, drawn with Cairo |
 | `dragController.js` | reordering by dragging the icon |
 | `shared.js` | state shared by synchronised monitors, Super+N owner |
 | `recent.js` | recent files for the jump list |

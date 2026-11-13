@@ -31,41 +31,11 @@
     color: #ffffff;
 }
 
-.win11-tb-backclip {
-    background-color: transparent;
-}
-
-.win11-tb-tile,
-.win11-tb-back {
-    border-radius: 4px;
-    background-color: transparent;
-    transition-duration: 150ms;
-}
+/* the tile and the page behind it are drawn by tileArt.js */
 
 .win11-tb-flash {
     border-radius: 4px;
     background-color: rgba(255, 106, 72, 0.45);
-}
-
-/* hover ≈ 7 %, focused window ≈ 6.5 %, focused + hover ≈ 9.5 %, pressed ≈ 4.5 % */
-.win11-tb-button:hover .win11-tb-tile,
-.win11-tb-button:hover .win11-tb-back {
-    background-color: rgba(255, 255, 255, 0.07);
-}
-
-.win11-tb-button:focused .win11-tb-tile,
-.win11-tb-button:focused .win11-tb-back {
-    background-color: rgba(255, 255, 255, 0.065);
-}
-
-.win11-tb-button:focused:hover .win11-tb-tile,
-.win11-tb-button:focused:hover .win11-tb-back {
-    background-color: rgba(255, 255, 255, 0.095);
-}
-
-.win11-tb-button:active .win11-tb-tile,
-.win11-tb-button:active .win11-tb-back {
-    background-color: rgba(255, 255, 255, 0.045);
 }
 
 /* running indicator: 6x3 grey when idle, 16x3 accent when focused */

@@ -3,6 +3,8 @@
 // (measured from Windows 11). Works on horizontal and vertical panels.
 const { Clutter, St, GLib } = imports.gi;
 
+const { TileArt } = require('./tileArt');
+
 const EASE_OUT = Clutter.AnimationMode.EASE_OUT_QUAD;
 const EASE_CUBIC = Clutter.AnimationMode.EASE_OUT_CUBIC;
 const EASE_SINE = Clutter.AnimationMode.EASE_IN_OUT_SINE;
@@ -26,6 +28,7 @@ class TaskButton {
         this._flashing = false;
         this._indicatorLen = -1;
         this._multi = null;
+        this._pressed = false;
         this._pulseId = 0;
         this._pulseStart = 0;
 
@@ -53,12 +56,9 @@ class TaskButton {
             x_align: Clutter.ActorAlign.FILL,
             y_align: Clutter.ActorAlign.FILL,
         };
-        // Back page of a stacked button: a full rounded tile whose left part is cut off, so only a 3 px
-        // piece with rounded outer corners shows to the right of the front tile (same as Windows 11).
-        this.back = new St.Widget(Object.assign({ style_class: 'win11-tb-backclip', visible: false, clip_to_allocation: true }, fill));
-        this.backPage = new St.Widget({ style_class: 'win11-tb-back' });
-        this.back.add_child(this.backPage);
-        this.tile = new St.Widget(Object.assign({ style_class: 'win11-tb-tile' }, fill));
+        // Tile and, for apps with several windows, the page behind it (one Cairo drawing).
+        this.art = new TileArt(this);
+        this.tile = this.art.actor;
         this.flash = new St.Widget(Object.assign({ style_class: 'win11-tb-flash', opacity: 0, visible: false }, fill));
         this.iconBin = new St.Widget({
             layout_manager: new Clutter.BinLayout(),
@@ -103,7 +103,7 @@ class TaskButton {
         });
         this.badge.add_child(this.badgeLabel);
 
-        [this.back, this.tile, this.flash, this.iconBin, this.indicator, this.track, this.fill, this.badge]
+        [this.tile, this.flash, this.iconBin, this.indicator, this.track, this.fill, this.badge]
             .forEach(a => this.layout.add_child(a));
 
         this.applyMetrics();
@@ -126,6 +126,7 @@ class TaskButton {
             this.applet.onButtonHover(this, true);
             return Clutter.EVENT_PROPAGATE;
         });
+        this.actor.connect('notify::hover', () => this.updateArt());
         this.actor.connect('clicked', (a, button) => this.applet.onButtonClicked(this, button));
         this.actor.connect('destroy', () => {
             this.destroyed = true;
@@ -143,15 +144,6 @@ class TaskButton {
         const m = this.applet.metrics;
         const H = m.horizontal;
         this.actor.set_size(m.tileW, m.tileH);
-
-        // Back tile of a stacked button: a 3 px sliver at the end of the along axis.
-        const backCross = Math.max(1, (H ? m.tileH : m.tileW) - 2 * m.px(1));
-        this.back.set_size(H ? m.backW : backCross, H ? backCross : m.backW);
-        this.back.set_x_align(H ? Clutter.ActorAlign.END : Clutter.ActorAlign.CENTER);
-        this.back.set_y_align(H ? Clutter.ActorAlign.CENTER : Clutter.ActorAlign.END);
-        const pageLen = m.backW + m.px(5);              // the hidden part only has to cover the corner radius
-        this.backPage.set_size(H ? pageLen : backCross, H ? backCross : pageLen);
-        this.backPage.set_position(H ? m.backW - pageLen : 0, H ? 0 : m.backW - pageLen);
 
         // Indicator and progress bar sit on the screen-edge side of the panel, 1 px inside the tile.
         let ax = Clutter.ActorAlign.CENTER;
@@ -205,22 +197,34 @@ class TaskButton {
         this._multi = multi;
         const m = this.applet.metrics;
         const H = m.horizontal;
-        [this.tile, this.flash].forEach(a => {
-            a.set_x_align(Clutter.ActorAlign.FILL);
-            a.set_y_align(Clutter.ActorAlign.FILL);
-            a.set_width(-1);
-            a.set_height(-1);
-            if (multi) {
-                if (H) {
-                    a.set_x_align(Clutter.ActorAlign.START);
-                    a.set_width(m.tileW - m.stackInset);
-                } else {
-                    a.set_y_align(Clutter.ActorAlign.START);
-                    a.set_height(m.tileH - m.stackInset);
-                }
+        // The attention flash follows the front tile, which is shorter when a page peeks out behind it.
+        const a = this.flash;
+        a.set_x_align(Clutter.ActorAlign.FILL);
+        a.set_y_align(Clutter.ActorAlign.FILL);
+        a.set_width(-1);
+        a.set_height(-1);
+        if (multi) {
+            if (H) {
+                a.set_x_align(Clutter.ActorAlign.START);
+                a.set_width(m.tileW - m.stackInset);
+            } else {
+                a.set_y_align(Clutter.ActorAlign.START);
+                a.set_height(m.tileH - m.stackInset);
             }
-        });
-        this.back.visible = multi;
+        }
+        this.art.setMulti(multi);
+    }
+
+    // Tile levels for the current hover / press / focus state (see tileArt.js).
+    updateArt(animate = true) {
+        if (this.destroyed) return;
+        const pressed = this._pressed === true;
+        const hover = this.actor.hover;
+        let name = 'idle';
+        if (pressed) name = 'pressed';
+        else if (this.focused) name = hover ? 'focusHover' : 'focused';
+        else if (hover) name = 'hover';
+        this.art.setState(name, animate && this.applet.animate);
     }
 
     // -------------------------------------------------------------------- icon
@@ -268,6 +272,7 @@ class TaskButton {
         this.focused = focused;
         this.attention = attention;
 
+        this.updateArt();
         if (focused) this.actor.add_style_pseudo_class('focused');
         else this.actor.remove_style_pseudo_class('focused');
 
@@ -422,6 +427,10 @@ class TaskButton {
 
     _setPressed(pressed) {
         if (this.destroyed || this.dragging) return;
+        if (this._pressed !== pressed) {
+            this._pressed = pressed;
+            this.updateArt();
+        }
         const target = pressed ? 0.85 : 1;
         if (this.iconBin.scale_x === target) return;
         this.iconBin.ease({
@@ -464,7 +473,6 @@ class TaskButton {
         this.iconBin.translation_y = 0;
         this.iconBin.opacity = on ? 0 : 255;
         this.tile.opacity = on ? 0 : 255;
-        this.back.opacity = on ? 0 : 255;
         if (on) this.flash.opacity = 0;
         this._showBadge();
         this._applyProgress();
@@ -529,7 +537,6 @@ class TaskButton {
             this.actor.set_reactive(false);
             this.indicator.opacity = 0;
             this.tile.opacity = 0;
-            this.back.opacity = 0;
             const prop = H ? 'translation_y' : 'translation_x';
             const drop = { opacity: 0, duration: 130, mode: EASE_CUBIC };
             drop[prop] = H ? m.px(10) : (m.side === St.Side.RIGHT ? -m.px(10) : m.px(10));

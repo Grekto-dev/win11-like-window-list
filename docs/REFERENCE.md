@@ -20,7 +20,19 @@ unless stated otherwise.
 | Running indicator, inactive | 6 × 3, colour ≈ white 55 %, rows 36–38 of the tile (1 px above tile bottom) |
 | Running indicator, focused | 16 × 3, accent colour (`#4cc2ff` in dark mode) |
 | Indicator, not running | none |
-| Two or more windows | front tile shrinks to 35 px (769–803 of a 40 px cell) and a *back page* shows to its right: x 806–808, y 1 px shorter top and bottom (38 of 40), outer (right) corners rounded ≈ radius 4, left edge cut square, 2 px empty gap between front tile and page, same fill as the front tile. Icon and indicator stay centred on the 40 px cell. Like the tile, the page only has a fill on hover / focused window; an idle button shows neither. Implemented as a clipped (3 px) container holding a full rounded tile whose left part is out of view, not as a free-standing bar. |
+| Two or more windows | front tile shrinks to 35 px and a *back page* shows to its right. The page is a full-size 40×40 rounded tile (radius ≈ 4.5) *behind* the front tile; what shows is the part outside the front tile grown by a 2 px gap, so its inner edge follows the front tile's rounded corner (crescent: top row starts at x 35, from x 37 on at the sides, 3 px wide at mid height) and its outer corners are rounded. It has the same fill and border as the front tile and, like it, exists only on hover / focus (nothing at idle). Icon and indicator stay centred on the 40 px cell. Drawn with Cairo in `tileArt.js` (CSS cannot make this shape). |
+
+**Tile states (measured, luminance over the bar, 40×40 tile, radius ≈ 4.5; the tile has a 1 px border):**
+
+| State | Fill | Top row | Sides | Bottom row |
+|---|---|---|---|---|
+| idle | none | – | – | – |
+| hover | +14 (≈ 6.5 % white) | +23 | +14 | +14 |
+| pressed | +10 (≈ 4.5 %) | +10 | +10 | +10 |
+| focused window | +14 | **+28** | +18 | +19 |
+| focused + hover | +19.5 (≈ 8.8 %) | +23 | +19.5 | **+14** (darker than the fill) |
+
+The applet reproduces these as white/black overlay alphas (see `LEVELS` in `tileArt.js`); a re-measurement on the Linux side gives top 28.4/23.3, mid 14/19, sides 18/19, bottom 21/15.8 for focused / focused+hover.
 | Attention (flashing) | tile fill pulses orange (≈ `rgba(255,106,72,.45)` at peak) with a ≈ 2 s period; indicator turns pink `#ff99a4` |
 
 ## Behaviour (additions measured later in the same VM)
