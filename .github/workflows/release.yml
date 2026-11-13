@@ -1,0 +1,31 @@
+name: Release
+# Pushing a tag like v1.0.0 checks the project, builds win11-window-list@cinnamon-<version>.zip and publishes it.
+on:
+  push:
+    tags: ["v*.*.*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get -o Acquire::Retries=3 update && sudo apt-get install -y --no-install-recommends nodejs gettext
+      - name: Tag must match metadata.json
+        run: |
+          v="$(python3 -c "import json;print(json.load(open('metadata.json'))['version'])")"
+          test "${GITHUB_REF_NAME#v}" = "$v"
+      - name: Static checks
+        run: python3 tests/static_check.py
+      - name: Build the package
+        run: scripts/build-release.sh
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Win11-Like Window List ${GITHUB_REF_NAME#v}" --notes-file CHANGELOG.md
+          fi

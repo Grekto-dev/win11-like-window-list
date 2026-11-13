@@ -31,15 +31,29 @@ The labels of the jump list follow the system language (Portuguese, Spanish, Eng
 
 Acrylic blur behind the flyouts (Cinnamon's `background-blur` crashes the shell here), dropping files on a button to open them, and the exact Windows easing curves (durations are approximations).
 
-## Install (development)
+## Install
+
+From a release: download `win11-window-list@cinnamon-<version>.zip` and unzip it into `~/.local/share/cinnamon/applets/`.
+
+From a clone:
 
 ```bash
-git clone https://github.com/Grekto-dev/win11-like-window-list.git ~/win11-window-list
-mkdir -p ~/.local/share/cinnamon/applets
-ln -sfn ~/win11-window-list ~/.local/share/cinnamon/applets/win11-window-list@cinnamon
+git clone https://github.com/Grekto-dev/win11-like-window-list.git
+cd win11-like-window-list
+./install.sh            # copies the files; use ./install.sh --link while developing
 ```
 
-Then add **Win11-Like Window List** from *System Settings → Applets*. Remove or disable the *Grouped window list* on that panel to avoid two lists.
+Then add **Win11-Like Window List** in *System Settings → Applets*. Remove or disable the *Grouped window list* on that panel to avoid two lists. Tested on Cinnamon 6.6.9 (X11).
+
+## Tests
+
+```bash
+python3 tests/static_check.py          # syntax, settings schema, translations (no Cinnamon needed)
+python3 tests/live_suite.py            # ~100 checks against a running Cinnamon session (see below)
+python3 tests/live_suite.py flyout art # only some sections: health lifecycle settings windows flyout art pin attention menu launcher xdnd language
+```
+
+The live suite drives the real shell (D-Bus `org.Cinnamon.Eval`, XTEST pointer and keys, small GTK test windows and, for the drag test, Nemo). It restores the applet settings and your pinned apps, but run it on a session you are not working in: it moves the pointer, opens windows and reloads the applet. Reloads are also checked for leaks.
 
 ## Layout
 
@@ -56,6 +70,12 @@ Then add **Win11-Like Window List** from *System Settings → Applets*. Remove o
 | `tooltip.js`, `popup.js`, `i18n.js`, `util.js` | helpers |
 | `stylesheet.css` | colours and radii |
 | `docs/REFERENCE.md` | measurements taken from Windows 11 |
+| `tests/` | static checks and the live test suite |
+| `install.sh`, `scripts/` | installer, release and translation build scripts |
+
+## Disclaimer
+
+Independent project, not affiliated with or endorsed by Microsoft. "Windows" is a trademark of Microsoft Corporation; it is used here only to describe the look and behaviour this applet imitates. The measurements in `docs/REFERENCE.md` were taken by observing a Windows 11 installation; no Microsoft code or assets are included.
 
 ## License
 

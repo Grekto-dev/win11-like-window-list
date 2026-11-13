@@ -348,6 +348,17 @@ class Win11WindowList extends Applet.Applet {
         this.flyout.destroy();
         this.menu.destroy();
         this.tip.destroy();
+        // Cinnamon never destroys the right-click menu and the tooltip it creates for every applet: they would
+        // stay in the stage after each reload or removal.
+        try {
+            if (this._menuManager && this._applet_context_menu) {
+                this._menuManager.removeMenu(this._applet_context_menu);
+                this._applet_context_menu.destroy();
+            }
+            if (this._applet_tooltip) this._applet_tooltip.destroy();
+        } catch (e) {
+            global.logError('win11-window-list: context menu cleanup: ' + e);
+        }
         if (this._placeholder) this._placeholder.remove(false);
         this._buttons.forEach(b => b.destroy(false));
         this._buttons.clear();
@@ -428,6 +439,7 @@ class Win11WindowList extends Applet.Applet {
     }
 
     _savePinned(ids) {
+        if (!Array.isArray(ids)) return;
         this.pinnedApps = ids;
         if (this._synced) Shared.publish(this, ids, this._btnOrder);
     }
@@ -476,6 +488,7 @@ class Win11WindowList extends Applet.Applet {
         c('notify::wm-class', () => this._queueRefresh());
         c('notify::gtk-application-id', () => this._queueRefresh());
         c('notify::demands-attention', () => this._onAttention(w));
+        c('notify::urgent', () => this._onAttention(w));
         c('notify::progress', () => this._queueStates());
         c('notify::progress-pulse', () => this._queueStates());
         this._wsig.set(w, ids);
@@ -525,13 +538,12 @@ class Win11WindowList extends Applet.Applet {
         this._queueStates();
     }
 
+    // A window asks for attention either with _NET_WM_STATE_DEMANDS_ATTENTION (`demands_attention`) or
+    // with the older WM_HINTS urgency flag (`urgent`, used by many GTK/Qt apps and terminals).
     _onAttention(w) {
         if (!w || this._isFocused(w)) return;
-        if (w.demands_attention === false && !this._attention.has(w)) {
-            this._queueStates();
-            return;
-        }
-        this._attention.add(w);
+        if (w.demands_attention || w.urgent) this._attention.add(w);
+        else this._attention.delete(w);
         this._queueStates();
     }
 
@@ -822,6 +834,7 @@ class Win11WindowList extends Applet.Applet {
                     if (v('progress-visible') !== undefined) cur.progressVisible = !!v('progress-visible');
                     if (v('urgent') !== undefined) cur.urgent = !!v('urgent');
                     this._launcher.set(id, cur);
+                    this._updateBadges();               // counts show at once; notifications are polled
                     this._queueStates();
                 } catch (e) {
                     global.logError('win11-window-list: bad LauncherEntry update: ' + e);
