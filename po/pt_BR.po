@@ -87,8 +87,8 @@ msgstr "Cor de destaque do indicador da janela em foco"
 msgid "Delay before the thumbnail flyout opens"
 msgstr "Atraso até abrir a miniatura"
 
-msgid "Peek at a window while hovering its thumbnail (other windows are hidden)"
-msgstr "Espiar a janela ao passar o mouse na miniatura (as outras janelas somem)"
+msgid "Peek at a window while hovering its thumbnail"
+msgstr "Espiar a janela ao passar o mouse na miniatura"
 
 msgid "Delay before peeking"
 msgstr "Atraso até espiar"
@@ -110,3 +110,15 @@ msgstr "Mostrar a contagem de notificações no botão"
 
 msgid "Show a progress bar on the button while an app reports progress"
 msgstr "Mostrar uma barra de progresso no botão enquanto um app informa progresso"
+
+msgid "Peek style"
+msgstr "Estilo da prévia"
+
+msgid "Only the window: the other windows fade away and the window appears alone over the desktop. Above the others: nothing is hidden and the window is drawn over whatever is on screen."
+msgstr "Só a janela: as outras janelas somem e a janela aparece sozinha sobre a área de trabalho. Acima das outras: nada é escondido e a janela é desenhada por cima do que estiver na tela."
+
+msgid "Only the window (others are hidden)"
+msgstr "Só a janela (as outras somem)"
+
+msgid "Above the other windows"
+msgstr "Acima das outras janelas"

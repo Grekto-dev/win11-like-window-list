@@ -20,7 +20,7 @@ unless stated otherwise.
 | Running indicator, inactive | 6 × 3, colour ≈ white 55 %, rows 36–38 of the tile (1 px above tile bottom) |
 | Running indicator, focused | 16 × 3, accent colour (`#4cc2ff` in dark mode) |
 | Indicator, not running | none |
-| Two or more windows | front tile shrinks to 35 px, a 3 px sliver of a back tile (1 px shorter top and bottom) sits 2 px to its right; icon and indicator stay centred on the 40 px cell. The sliver only shows while the tile has a fill (hover / focused). |
+| Two or more windows | front tile shrinks to 35 px (769–803 of a 40 px cell) and a *back page* shows to its right: x 806–808, y 1 px shorter top and bottom (38 of 40), outer (right) corners rounded ≈ radius 4, left edge cut square, 2 px empty gap between front tile and page, same fill as the front tile. Icon and indicator stay centred on the 40 px cell. Like the tile, the page only has a fill on hover / focused window; an idle button shows neither. Implemented as a clipped (3 px) container holding a full rounded tile whose left part is out of view, not as a free-standing bar. |
 | Attention (flashing) | tile fill pulses orange (≈ `rgba(255,106,72,.45)` at peak) with a ≈ 2 s period; indicator turns pink `#ff99a4` |
 
 ## Behaviour (additions measured later in the same VM)

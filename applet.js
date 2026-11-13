@@ -149,6 +149,7 @@ class Win11WindowList extends Applet.Applet {
         s.bindProperty(IN, 'indicator-color', 'accentColor', () => this._queueStates());
         s.bindProperty(IN, 'hover-delay', 'hoverDelay', null);
         s.bindProperty(IN, 'enable-peek', 'enablePeek', null);
+        s.bindProperty(IN, 'peek-mode', 'peekMode', null);
         s.bindProperty(IN, 'peek-delay', 'peekDelay', null);
         s.bindProperty(IN, 'enable-animations', 'enableAnimations', null);
         s.bindProperty(IN, 'launch-animation', 'launchAnimation', null);

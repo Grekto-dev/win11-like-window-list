@@ -31,6 +31,10 @@
     color: #ffffff;
 }
 
+.win11-tb-backclip {
+    background-color: transparent;
+}
+
 .win11-tb-tile,
 .win11-tb-back {
     border-radius: 4px;

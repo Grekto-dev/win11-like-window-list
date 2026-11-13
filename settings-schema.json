@@ -45,7 +45,7 @@
         "flyout-hover": {
             "type": "section",
             "title": "Thumbnails",
-            "keys": ["hover-delay", "enable-peek", "peek-delay"]
+            "keys": ["hover-delay", "enable-peek", "peek-mode", "peek-delay"]
         },
         "flyout-anim": {
             "type": "section",
@@ -139,7 +139,18 @@
     "enable-peek": {
         "type": "switch",
         "default": true,
-        "description": "Peek at a window while hovering its thumbnail (other windows are hidden)"
+        "description": "Peek at a window while hovering its thumbnail"
+    },
+    "peek-mode": {
+        "type": "combobox",
+        "default": "isolate",
+        "description": "Peek style",
+        "tooltip": "Only the window: the other windows fade away and the window appears alone over the desktop. Above the others: nothing is hidden and the window is drawn over whatever is on screen.",
+        "options": {
+            "Only the window (others are hidden)": "isolate",
+            "Above the other windows": "overlay"
+        },
+        "dependency": "enable-peek"
     },
     "peek-delay": {
         "type": "spinbutton",

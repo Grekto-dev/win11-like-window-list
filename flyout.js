@@ -27,6 +27,7 @@ class Flyout {
         this._peekClone = null;
         this._peekWindow = null;
         this._peeking = false;
+        this._peekIsolated = true;          // mode of the peek in progress
         this._hidden = [];                  // [windowActor, original opacity] hidden during a peek
         this._clones = new Set();           // every peek clone we created (crossfades overlap)
         this._captureId = 0;
@@ -371,10 +372,13 @@ class Flyout {
         this._peeking = true;
         this._peekWindow = w;
         this._peekClone = clone;
-        const ms = this._fadeMs();
+        // 'isolate': every other window fades out and only this one is shown, in place.
+        // 'overlay': nothing else changes; the window is shown above whatever is on screen.
+        this._peekIsolated = this.applet.peekMode !== 'overlay';
+        const ms = this._peekIsolated ? this._fadeMs() : (this.applet.animate ? 200 : 0);
         if (ms) clone.ease({ opacity: 255, duration: ms, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
         else clone.opacity = 255;
-        this._hideOthers(w);
+        if (this._peekIsolated) this._hideOthers(w);
     }
 
     _switchPeek(w) {
@@ -383,15 +387,17 @@ class Flyout {
         const old = this._peekClone;
         const clone = this._makeClone(w);
         if (!clone) return;
-        // Only the two windows involved change: the new target is shown, the old one is hidden.
-        const newActor = w.get_compositor_private();
-        const keep = [];
-        this._hidden.forEach(entry => {
-            if (entry[0] === newActor) this._fadeBack(entry);
-            else keep.push(entry);
-        });
-        this._hidden = keep;
-        this._hideActor(this._peekWindow && this._peekWindow.get_compositor_private());
+        if (this._peekIsolated) {
+            // Only the two windows involved change: the new target is shown, the old one is hidden.
+            const newActor = w.get_compositor_private();
+            const keep = [];
+            this._hidden.forEach(entry => {
+                if (entry[0] === newActor) this._fadeBack(entry);
+                else keep.push(entry);
+            });
+            this._hidden = keep;
+            this._hideActor(this._peekWindow && this._peekWindow.get_compositor_private());
+        }
         this._peekWindow = w;
         this._peekClone = clone;
         const ms = this.applet.animate ? 130 : 0;
@@ -423,7 +429,16 @@ class Flyout {
         this._peekWindow = null;
         this._peeking = false;
         this._restoreOthers();
-        Array.from(this._clones).forEach(c => this._dropClone(c));
+        const ms = !this._peekIsolated && this.applet.animate ? 120 : 0;
+        Array.from(this._clones).forEach(c => {
+            if (!ms) {
+                this._dropClone(c);
+                return;
+            }
+            this._clones.delete(c);
+            c.remove_all_transitions();
+            c.ease({ opacity: 0, duration: ms, mode: Clutter.AnimationMode.EASE_OUT_QUAD, onComplete: () => this._dropClone(c) });
+        });
     }
 
     // -------------------------------------------- sticky flyout: outside click / Esc

@@ -53,7 +53,11 @@ class TaskButton {
             x_align: Clutter.ActorAlign.FILL,
             y_align: Clutter.ActorAlign.FILL,
         };
-        this.back = new St.Widget(Object.assign({ style_class: 'win11-tb-back', visible: false }, fill));
+        // Back page of a stacked button: a full rounded tile whose left part is cut off, so only a 3 px
+        // piece with rounded outer corners shows to the right of the front tile (same as Windows 11).
+        this.back = new St.Widget(Object.assign({ style_class: 'win11-tb-backclip', visible: false, clip_to_allocation: true }, fill));
+        this.backPage = new St.Widget({ style_class: 'win11-tb-back' });
+        this.back.add_child(this.backPage);
         this.tile = new St.Widget(Object.assign({ style_class: 'win11-tb-tile' }, fill));
         this.flash = new St.Widget(Object.assign({ style_class: 'win11-tb-flash', opacity: 0, visible: false }, fill));
         this.iconBin = new St.Widget({
@@ -145,6 +149,9 @@ class TaskButton {
         this.back.set_size(H ? m.backW : backCross, H ? backCross : m.backW);
         this.back.set_x_align(H ? Clutter.ActorAlign.END : Clutter.ActorAlign.CENTER);
         this.back.set_y_align(H ? Clutter.ActorAlign.CENTER : Clutter.ActorAlign.END);
+        const pageLen = m.backW + m.px(5);              // the hidden part only has to cover the corner radius
+        this.backPage.set_size(H ? pageLen : backCross, H ? backCross : pageLen);
+        this.backPage.set_position(H ? m.backW - pageLen : 0, H ? 0 : m.backW - pageLen);
 
         // Indicator and progress bar sit on the screen-edge side of the panel, 1 px inside the tile.
         let ax = Clutter.ActorAlign.CENTER;
