@@ -20,6 +20,16 @@ jobs:
         run: python3 tests/static_check.py
       - name: Build the package
         run: scripts/build-release.sh
+      - name: Release notes (the CHANGELOG section of this version)
+        run: |
+          python3 - "${GITHUB_REF_NAME#v}" <<'PY'
+          import re, sys
+          text = open('CHANGELOG.md').read()
+          m = re.search(r'^## ' + re.escape(sys.argv[1]) + r'\n(.*?)(?=^## |\Z)', text, re.S | re.M)
+          if not m:
+              sys.exit('no CHANGELOG section for ' + sys.argv[1])
+          open('notes.md', 'w').write(m.group(1).strip() + '\n')
+          PY
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -27,5 +37,5 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Win11-Like Window List ${GITHUB_REF_NAME#v}" --notes-file CHANGELOG.md
+            gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Win11-Like Window List ${GITHUB_REF_NAME#v}" --notes-file notes.md
           fi

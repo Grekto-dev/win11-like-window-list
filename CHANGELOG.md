@@ -1,4 +1,10 @@
-## Win11-Like Window List 1.0.0
+## 1.0.1
+
+- **Monitors are synchronised by default.** Moving, pinning or unpinning buttons on one bar now changes every bar of the applet (other monitors) out of the box. Existing installs keep their saved choice; turn on *Synchronise monitors* in the settings.
+- **Fix: turning synchronisation on no longer drops pins.** The pins of every bar are merged (union) instead of the first bar's list replacing the others.
+- Live test for synchronised bars (drag on either bar, pin, unpin) and a unit check of the shared state.
+
+## 1.0.0
 
 First release. A window list for the Cinnamon panel that looks and behaves like the window buttons of the Windows 11 taskbar; geometry, colours and behaviours were measured on a Windows 11 24H2 installation (see `docs/REFERENCE.md`).
 

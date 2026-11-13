@@ -497,8 +497,49 @@ def s_launcher():
     check('no errors logged by LauncherEntry', not errs, errs[:3])
 
 
+
+def s_sync():
+    print('\n== several monitors: bars with "synchronise monitors" follow each other (needs 2 instances)')
+    off = log_offset()
+    I = lambda n: "imports.ui.appletManager.getRunningInstancesForUuid('%s').find(a=>a.instance_id==%d)" % (UUID, n)
+    ids = evj("imports.ui.appletManager.getRunningInstancesForUuid('%s').filter(a=>a._synced).map(a=>a.instance_id)" % UUID) or []
+    if len(ids) < 2:
+        print('skip (needs two instances with synchronisation on)'); return
+    a, b = int(ids[0]), int(ids[1])
+    order = lambda n: evj("%s.liveButtons().map(x=>x.id)" % I(n))
+    pins = lambda n: evj("%s.pinnedApps" % I(n))
+    check('both bars show the same buttons in the same order', order(a) == order(b), (order(a), order(b)))
+    check('both bars have the same pins', pins(a) == pins(b), (pins(a), pins(b)))
+    saved = pins(a)
+    def drag(n, idx, dx):
+        r = evj("(()=>{let x=%s.liveButtons()[%d];let [px,py]=x.actor.get_transformed_position();let [w,h]=x.actor.get_transformed_size();return [Math.round(px+w/2),Math.round(py+h/2)]})()" % (I(n), idx))
+        sx, sy = r
+        mv(sx - 6, sy); time.sleep(.2); mv(sx, sy); time.sleep(.3); btn(1, True); time.sleep(.2)
+        for i in range(1, 25):
+            mv(sx + dx * i / 24, sy); time.sleep(.05)
+        time.sleep(.4); btn(1, False); time.sleep(1.3); mv(2500, 300)
+    before = order(a)
+    drag(a, len(before) - 1, -2 * 44)
+    oa, ob = order(a), order(b)
+    check('dragging on bar A reorders bar B too', oa == ob and oa != before, (before, oa, ob))
+    before = order(b)
+    drag(b, 0, 2 * 44)
+    oa, ob = order(a), order(b)
+    check('dragging on bar B reorders bar A too', oa == ob and oa != before, (before, oa, ob))
+    first = pins(a)[0]
+    ev("(()=>{let a=%s;let btn=a.liveButtons().find(x=>x.id==='%s');a.unpin(btn);return 1})()" % (I(a), first)); time.sleep(1)
+    check('unpinning on bar A unpins on bar B', first not in (pins(b) or []), pins(b))
+    f = {n: json.loads((SETTINGS / ('%d.json' % n)).read_text())['pinned-apps']['value'] for n in (a, b)}
+    check('both settings files saved the same pins', f[a] == f[b], f)
+    ev("(()=>{let a=%s;a.pinnedApps=%s;a._queueRefresh();return 1})()" % (I(a), json.dumps(saved))); time.sleep(.5)
+    ev("(()=>{let a=%s;a._savePinned(%s);return 1})()" % (I(a), json.dumps(saved))); time.sleep(1)
+    check('pins restored on both bars', pins(a) == saved and pins(b) == saved, (pins(a), pins(b), saved))
+    errs = log_since(off)
+    check('no errors logged by synchronisation', not errs, errs[:3])
+
+
 SECTIONS = [('health', s_health), ('lifecycle', s_lifecycle), ('settings', s_settings_fuzz), ('windows', s_windows),
-            ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language)]
+            ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('sync', s_sync), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language)]
 
 if __name__ == '__main__':
     want = sys.argv[1:]

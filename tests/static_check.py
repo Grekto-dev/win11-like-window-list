@@ -121,5 +121,26 @@ for f in sorted(root.glob('*.js')):
             err('debug leftover %s:%d: %s' % (f.name, n, line.strip()))
 ok('no debug leftovers')
 
+# 10. shared state of synchronised bars (plain JS, runs in node)
+js = '''
+const S = require('./shared.js');
+const mk = () => ({ n: 0, onSharedChanged() { this.n++; }, isOnPrimary() { return false; }, instanceId: 1, setHotkeyOwner() {} });
+const a = mk(), b = mk();
+let r = S.join(a, [], []);
+if (r.pinned.length) throw new Error('first join should seed from itself');
+r = S.join(b, ['x.desktop', 'y.desktop'], ['x', 'y']);
+if (r.pinned.join() !== 'x.desktop,y.desktop') throw new Error('joining must add the joiner pins, got ' + r.pinned);
+if (a.n !== 1) throw new Error('first instance must be told about the added pins');
+S.publish(a, ['y.desktop'], ['y']);
+if (b.n !== 1 || S.snapshot().pinned.join() !== 'y.desktop') throw new Error('publish must reach the others');
+S.leave(a); S.leave(b);
+if (S.count() !== 0 || S.snapshot().pinned.length) throw new Error('state must reset when the last instance leaves');
+'''
+r = subprocess.run(['node', '-e', js], cwd=root, capture_output=True, text=True)
+if r.returncode:
+    err('shared.js: ' + r.stderr.strip().splitlines()[-1])
+else:
+    ok('shared.js: join merges pins, publish and leave behave')
+
 print('\n%d problem(s)' % len(errors))
 sys.exit(1 if errors else 0)

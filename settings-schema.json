@@ -94,7 +94,7 @@
     },
     "sync-monitors": {
         "type": "switch",
-        "default": false,
+        "default": true,
         "description": "Synchronise monitors: every bar with this option shows the same windows, order and pinned apps",
         "tooltip": "Use when the applet is on the panels of more than one monitor."
     },

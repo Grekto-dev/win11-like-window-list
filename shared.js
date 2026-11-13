@@ -3,13 +3,25 @@
 const listeners = new Set();
 const state = { ready: false, pinned: [], order: [] };
 
-// An instance joins with its own saved pins; the first one seeds the shared state.
+// An instance joins with its own saved pins. The first one seeds the shared state; later ones ADD
+// what they had pinned (and any buttons they ordered) so turning the option on never drops pins that
+// only one of the bars knew about.
 function join(listener, seedPinned, seedOrder) {
     listeners.add(listener);
     if (!state.ready) {
         state.pinned = seedPinned.slice();
         state.order = seedOrder.slice();
         state.ready = true;
+    } else {
+        const newPins = seedPinned.filter(id => !state.pinned.includes(id));
+        const newOrder = seedOrder.filter(id => !state.order.includes(id));
+        if (newPins.length || newOrder.length) {
+            state.pinned = state.pinned.concat(newPins);
+            state.order = state.order.concat(newOrder);
+            listeners.forEach(l => {
+                if (l !== listener) l.onSharedChanged();
+            });
+        }
     }
     return { pinned: state.pinned.slice(), order: state.order.slice() };
 }
