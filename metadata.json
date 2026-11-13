@@ -1,0 +1,8 @@
+{
+    "uuid": "win11-window-list@cinnamon",
+    "name": "Win11-Like Window List",
+    "description": "Window list that looks and behaves like the Windows 11 taskbar buttons: centred icons, pinned apps, running indicators, thumbnail flyout and jump list",
+    "website": "https://github.com/Grekto-dev/win11-like-window-list",
+    "icon": "cs-windows",
+    "max-instances": -1
+}

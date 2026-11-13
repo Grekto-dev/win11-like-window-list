@@ -1,0 +1,193 @@
+/* =========================================================================
+ * Win11-Like Window List
+ * Colours and geometry measured from the Windows 11 taskbar (dark mode);
+ * see docs/REFERENCE.md. Geometry that depends on the panel is set in JS.
+ * ========================================================================= */
+
+/* ---- applet container ---------------------------------------------------- */
+
+.win11-tb-applet {
+    padding: 0;
+    margin: 0;
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+.win11-tb-box {
+    spacing: 4px;
+    padding: 0;
+}
+
+/* ---- button -------------------------------------------------------------- */
+
+.win11-tb-button {
+    padding: 0;
+    margin: 0;
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+    box-shadow: none;
+    color: #ffffff;
+}
+
+.win11-tb-tile,
+.win11-tb-back {
+    border-radius: 4px;
+    background-color: transparent;
+}
+
+.win11-tb-flash {
+    border-radius: 4px;
+    background-color: rgba(255, 106, 72, 0.45);
+}
+
+/* hover ≈ 7 %, focused window ≈ 6.5 %, focused + hover ≈ 9.5 %, pressed ≈ 4.5 % */
+.win11-tb-button:hover .win11-tb-tile,
+.win11-tb-button:hover .win11-tb-back {
+    background-color: rgba(255, 255, 255, 0.07);
+}
+
+.win11-tb-button:focused .win11-tb-tile,
+.win11-tb-button:focused .win11-tb-back {
+    background-color: rgba(255, 255, 255, 0.065);
+}
+
+.win11-tb-button:focused:hover .win11-tb-tile,
+.win11-tb-button:focused:hover .win11-tb-back {
+    background-color: rgba(255, 255, 255, 0.095);
+}
+
+.win11-tb-button:active .win11-tb-tile,
+.win11-tb-button:active .win11-tb-back {
+    background-color: rgba(255, 255, 255, 0.045);
+}
+
+/* running indicator: 6x3 grey when idle, 16x3 accent when focused */
+.win11-tb-indicator {
+    border-radius: 2px;
+    background-color: rgba(255, 255, 255, 0.55);
+}
+
+.win11-tb-button:focused .win11-tb-indicator {
+    background-color: #4cc2ff;
+}
+
+.win11-tb-button:attention .win11-tb-indicator {
+    background-color: #ff99a4;
+}
+
+/* ---- thumbnail flyout ---------------------------------------------------- */
+
+.win11-tb-flyout {
+    padding: 0;
+    spacing: 0;
+    border-radius: 8px;
+    background-color: rgb(43, 46, 53);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 8px 24px 0 rgba(0, 0, 0, 0.45);
+}
+
+.win11-tb-card {
+    padding: 8px;
+    spacing: 8px;
+    border-radius: 8px;
+    background-color: transparent;
+}
+
+.win11-tb-card:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.win11-tb-card-header {
+    spacing: 8px;
+    height: 24px;
+}
+
+.win11-tb-card-title {
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 13px;
+}
+
+.win11-tb-card-close {
+    border-radius: 4px;
+    color: #ffffff;
+    padding: 0;
+    background-color: transparent;
+}
+
+.win11-tb-card-close:hover {
+    background-color: rgba(255, 255, 255, 0.09);
+}
+
+.win11-tb-card-close:active {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.win11-tb-row {
+    padding: 6px 8px;
+}
+
+/* ---- tooltip ------------------------------------------------------------- */
+
+.win11-tb-tip {
+    padding: 6px 8px;
+    border-radius: 4px;
+    background-color: rgb(43, 46, 53);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.4);
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 13px;
+}
+
+/* ---- jump list ----------------------------------------------------------- */
+
+.win11-tb-menu {
+    padding: 4px;
+    spacing: 0;
+    min-width: 286px;
+    border-radius: 8px;
+    background-color: rgb(44, 46, 53);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 8px 24px 0 rgba(0, 0, 0, 0.45);
+}
+
+.win11-tb-menu-header {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.win11-tb-menu-item {
+    padding: 0 12px;
+    spacing: 12px;
+    border-radius: 4px;
+    background-color: transparent;
+    border: 2px solid transparent;
+}
+
+.win11-tb-menu-item:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.win11-tb-menu-item:active {
+    background-color: rgba(255, 255, 255, 0.04);
+}
+
+.win11-tb-menu-focus {
+    border: 2px solid #ffffff;
+}
+
+.win11-tb-menu-label {
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 14px;
+}
+
+.win11-tb-menu-icon {
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.win11-tb-menu-sep {
+    background-color: rgba(255, 255, 255, 0.08);
+}

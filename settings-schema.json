@@ -1,0 +1,107 @@
+{
+    "layout1": {
+        "type": "layout",
+        "pages": ["general", "flyout"],
+        "general": {
+            "type": "page",
+            "title": "General",
+            "sections": ["general-windows", "general-look"]
+        },
+        "flyout": {
+            "type": "page",
+            "title": "Hover and animations",
+            "sections": ["flyout-hover", "flyout-anim"]
+        },
+        "general-windows": {
+            "type": "section",
+            "title": "Windows",
+            "keys": ["show-all-workspaces", "show-all-monitors", "super-num-hotkeys"]
+        },
+        "general-look": {
+            "type": "section",
+            "title": "Appearance",
+            "keys": ["icon-size", "indicator-color"]
+        },
+        "flyout-hover": {
+            "type": "section",
+            "title": "Thumbnails",
+            "keys": ["hover-delay", "enable-peek", "peek-delay"]
+        },
+        "flyout-anim": {
+            "type": "section",
+            "title": "Animations",
+            "keys": ["enable-animations", "launch-animation"]
+        }
+    },
+    "pinned-apps": {
+        "type": "generic",
+        "default": []
+    },
+    "pinned-imported": {
+        "type": "generic",
+        "default": false
+    },
+    "show-all-workspaces": {
+        "type": "switch",
+        "default": false,
+        "description": "Show windows from all workspaces"
+    },
+    "show-all-monitors": {
+        "type": "switch",
+        "default": true,
+        "description": "Show windows from all monitors"
+    },
+    "super-num-hotkeys": {
+        "type": "switch",
+        "default": true,
+        "description": "Super+1…9 activates the Nth button (Super+Shift+N opens a new window)"
+    },
+    "icon-size": {
+        "type": "spinbutton",
+        "default": 24,
+        "min": 16,
+        "max": 32,
+        "step": 2,
+        "units": "px",
+        "description": "Icon size"
+    },
+    "indicator-color": {
+        "type": "colorchooser",
+        "default": "rgb(76,194,255)",
+        "description": "Accent colour of the focused-window indicator"
+    },
+    "hover-delay": {
+        "type": "spinbutton",
+        "default": 400,
+        "min": 0,
+        "max": 2000,
+        "step": 50,
+        "units": "ms",
+        "description": "Delay before the thumbnail flyout opens"
+    },
+    "enable-peek": {
+        "type": "switch",
+        "default": true,
+        "description": "Peek at a window while hovering its thumbnail"
+    },
+    "peek-delay": {
+        "type": "spinbutton",
+        "default": 500,
+        "min": 0,
+        "max": 2000,
+        "step": 50,
+        "units": "ms",
+        "description": "Delay before peeking",
+        "dependency": "enable-peek"
+    },
+    "enable-animations": {
+        "type": "switch",
+        "default": true,
+        "description": "Animate buttons, indicators and flyouts"
+    },
+    "launch-animation": {
+        "type": "switch",
+        "default": true,
+        "description": "Bounce the icon while an app is launching"
+    }
+}
