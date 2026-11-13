@@ -282,6 +282,22 @@ class Flyout {
         this.actor.set_position(x, y);
     }
 
+    // Where a dragged item (coming from another program, so without Clutter hover events) is: over one of
+    // the cards -> { card, window }; over the flyout but not a card -> { inside: true }; else null.
+    hitTest(x, y) {
+        if (!this.actor) return null;
+        const inside = a => {
+            const [ax, ay] = a.get_transformed_position();
+            const [aw, ah] = a.get_transformed_size();
+            return x >= ax && x < ax + aw && y >= ay && y < ay + ah;
+        };
+        if (!inside(this.actor)) return null;
+        for (const [w, entry] of this._cards) {
+            if (inside(entry.card)) return { card: entry.card, window: w };
+        }
+        return { inside: true };
+    }
+
     // -------------------------------------------------------------------- peek
     // Windows 11 "Aero Peek" (measured in the VM, see docs/REFERENCE.md): with the pointer on a thumbnail
     // card for ~0.4 s every other window disappears at once and only that window is shown, in place,

@@ -45,7 +45,7 @@
         "flyout-hover": {
             "type": "section",
             "title": "Thumbnails",
-            "keys": ["hover-delay", "enable-peek", "peek-mode", "peek-delay"]
+            "keys": ["hover-delay", "xdnd-delay", "enable-peek", "peek-mode", "peek-delay"]
         },
         "flyout-anim": {
             "type": "section",
@@ -135,6 +135,15 @@
         "step": 50,
         "units": "ms",
         "description": "Delay before the thumbnail flyout opens"
+    },
+    "xdnd-delay": {
+        "type": "spinbutton",
+        "default": 400,
+        "min": 100,
+        "max": 2000,
+        "step": 50,
+        "units": "ms",
+        "description": "Delay before bringing a window forward while dragging an item over it"
     },
     "enable-peek": {
         "type": "switch",

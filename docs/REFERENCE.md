@@ -33,7 +33,7 @@ unless stated otherwise.
 - **Progress.** While an app reports progress the bar replaces the running indicator: a 1 px track as wide as the icon with a 3 px accent fill. Indeterminate progress sweeps a segment left to right on a ~1.1 s loop. Error/paused states change the fill colour (not reproduced: Linux has no equivalent state).
 - **Badge.** Windows' overlay icon / notification count is a ~16 px accent circle at the icon's top-right corner, bold number in black (Linux counterpart: notification count of the app and the Unity LauncherEntry `count`).
 - **Flyout / jump list motion.** Both slide up from under the bar, clipped by it: flyout ≈ 250 ms, jump list ≈ 150–200 ms, strong ease-out; closing is a quick fade (~50 ms).
-- **Dragging an item from another window over a button** brings that app's window forward after a short dwell (Windows) — here 1 s.
+- **Dragging a file from another window over a button.** Not reproducible in the reference VM: with the folder or `.txt` file held (and wiggled) over the Terminal, Explorer (2 windows) and Notepad (2 windows) buttons for 4+ s (frames `ddA`–`ddE`), Windows 11 24H2 neither raised the window nor opened the thumbnails. The applet therefore uses its own, adjustable timing (setting *Delay before bringing a window forward while dragging an item over it*, default 400 ms): over a one-window button the window comes forward; over a multi-window button the flyout opens and holding the item on one of its cards raises that window, so a file can be dragged from one window of an app to another window of the same app.
 
 ## Behaviour
 

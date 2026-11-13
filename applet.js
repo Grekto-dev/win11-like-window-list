@@ -16,7 +16,6 @@ const { ReorderDrag } = require('./dragController');
 const { recentFor } = require('./recent');
 const Shared = require('./shared');
 
-const XDND_HOVER_DELAY = 1000;   // ms a dragged item must rest on a button before its window comes forward
 const TIP_DELAY = 700;           // ms before the text tooltip of a button without windows
 const BADGE_POLL_SECONDS = 2;
 const MIN_ICON = 16;
@@ -97,11 +96,12 @@ class Win11WindowList extends Applet.Applet {
         this._groups = null;
         this._launcher = new Map();      // desktop id -> Unity LauncherEntry data (count, progress, urgent)
         this._launcherSub = 0;
-        this._xdndHover = null;
+        this._xdndKey = null;               // what the dragged item is over: a button or a window card
+        this._xdndMarked = null;            // actor currently shown as hovered
         this._xdndTimer = new Timer();
         this._xdndEndId = 0;
         this._xdndBeginId = 0;
-        this._xdndPollId = 0;
+        this._xdndMonitor = null;
 
         this.setAllowedLayout(Applet.AllowedLayout.BOTH);
         this.actor.set_track_hover(false);
@@ -148,6 +148,7 @@ class Win11WindowList extends Applet.Applet {
         s.bindProperty(BOTH, 'icon-size', 'iconSize', () => this._onMetricsChanged());
         s.bindProperty(IN, 'indicator-color', 'accentColor', () => this._queueStates());
         s.bindProperty(IN, 'hover-delay', 'hoverDelay', null);
+        s.bindProperty(IN, 'xdnd-delay', 'xdndDelay', null);
         s.bindProperty(IN, 'enable-peek', 'enablePeek', null);
         s.bindProperty(IN, 'peek-mode', 'peekMode', null);
         s.bindProperty(IN, 'peek-delay', 'peekDelay', null);
@@ -327,8 +328,7 @@ class Win11WindowList extends Applet.Applet {
         if (this._xdndEndId && Main.xdndHandler) Main.xdndHandler.disconnect(this._xdndEndId);
         if (this._xdndBeginId && Main.xdndHandler) Main.xdndHandler.disconnect(this._xdndBeginId);
         this._xdndBeginId = 0;
-        if (this._xdndPollId) GLib.source_remove(this._xdndPollId);
-        this._xdndPollId = 0;
+        this._xdndStop();
         this._xdndEndId = 0;
         [this._refreshId, this._statesId, this._badgeId].forEach(id => {
             if (id) GLib.source_remove(id);
@@ -835,36 +835,54 @@ class Win11WindowList extends Applet.Applet {
     }
 
     // ------------------------------------- dragging files (from other windows) over the buttons
-    // Like Windows, holding a dragged item over a button for a moment brings that app's window forward
-    // so the item can be dropped into it. Cinnamon cannot receive the drop itself.
+    // Holding a dragged item over a button brings that app's window forward so the item can be dropped
+    // into it; over a button with several windows the thumbnail flyout opens and holding the item over
+    // one of its cards brings that particular window forward (also lets you drag between two windows of
+    // the same app). Cinnamon cannot receive the drop itself: the item is dropped on the raised window.
+    //
+    // The pointer position of a drag coming from another program reaches us through a drag monitor
+    // (Cinnamon's XdndHandler forwards every position to them), so there is no polling.
 
-    // Cinnamon's XdndHandler does not hand positions to chrome actors (it picks with PickMode.NONE), so
-    // while a drag from another window is running the pointer is polled instead.
     _subscribeXdnd() {
         if (!Main.xdndHandler) return;
-        this._xdndBeginId = Main.xdndHandler.connect('drag-begin', () => this._xdndStart());
-        this._xdndEndId = Main.xdndHandler.connect('drag-end', () => this._xdndLeave());
+        this._xdndBeginId = Main.xdndHandler.connect('drag-begin', () => this._xdndBegin());
+        this._xdndEndId = Main.xdndHandler.connect('drag-end', () => this._xdndEnd());
     }
 
-    _xdndStart() {
-        if (this._xdndPollId || this.destroyed) return;
-        this._xdndPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
-            if (this.destroyed) {
-                this._xdndPollId = 0;
-                return GLib.SOURCE_REMOVE;
-            }
-            const [x, y] = global.get_pointer();
-            this._xdndOver(x, y);
-            return GLib.SOURCE_CONTINUE;
-        });
+    _xdndBegin() {
+        if (this.destroyed) return;
+        this.flyout.cancelClose();
+        if (this._xdndMonitor) return;
+        this._xdndMonitor = { dragMotion: ev => this._xdndMotion(ev) };
+        DND.addDragMonitor(this._xdndMonitor);
     }
 
-    _xdndLeave() {
-        if (this._xdndPollId) GLib.source_remove(this._xdndPollId);
-        this._xdndPollId = 0;
+    // The pointer left the chrome (panel, flyout): the window under it is the drop target now. The gap
+    // between the bar and the flyout counts as "left" too, so the flyout only closes after a grace period.
+    _xdndEnd() {
         this._xdndTimer.clear();
-        this._xdndHover = null;
-        if (this.flyout.isOpen && !this.flyout.sticky) this.flyout.close(true);
+        this._xdndKey = null;
+        this._xdndMark(null);
+        this._xdndStop();
+        if (this.flyout.isOpen && !this.flyout.sticky) this.flyout.scheduleClose();
+    }
+
+    _xdndStop() {
+        if (this._xdndMonitor) DND.removeDragMonitor(this._xdndMonitor);
+        this._xdndMonitor = null;
+        this._xdndTimer.clear();
+        this._xdndMark(null);
+    }
+
+    _xdndMark(actor) {
+        if (this._xdndMarked === actor) return;
+        if (this._xdndMarked) {
+            try {
+                this._xdndMarked.remove_style_pseudo_class('hover');
+            } catch (e) { /* destroyed */ }
+        }
+        this._xdndMarked = actor;
+        if (actor) actor.add_style_pseudo_class('hover');
     }
 
     _buttonAt(x, y) {
@@ -875,16 +893,43 @@ class Win11WindowList extends Applet.Applet {
         }) || null;
     }
 
-    _xdndOver(stageX, stageY) {
-        const btn = this._buttonAt(stageX, stageY);
-        if (btn === this._xdndHover) return;
+    _xdndMotion(ev) {
+        if (ev.source !== Main.xdndHandler || this.destroyed) return DND.DragMotionResult.CONTINUE;
+        this._xdndOver(ev.x, ev.y);
+        return DND.DragMotionResult.CONTINUE;
+    }
+
+    _xdndOver(x, y) {
+        const hit = this.flyout.hitTest(x, y);          // { card, window } | { inside: true } | null
+        const btn = hit ? null : this._buttonAt(x, y);
+        const key = hit && hit.window ? hit.window : (hit ? this.flyout : btn);
+        // Keep the flyout while the item is over it or over its own button; otherwise let it go.
+        if (this.flyout.isOpen && !this.flyout.sticky) {
+            if (hit || (btn && btn === this.flyout.button)) this.flyout.cancelClose();
+            else this.flyout.scheduleClose();
+        }
+        if (key === this._xdndKey) return;
+        this._xdndKey = key;
         this._xdndTimer.clear();
-        this._xdndHover = btn;
+
+        if (hit && hit.window) {
+            this._xdndMark(hit.card);
+            const w = hit.window;
+            this._xdndTimer.set(this.xdndDelay, () => {
+                if (this._xdndKey === w) this.activateWindow(w);
+            });
+            return;
+        }
+        this._xdndMark(hit ? null : (btn && btn.windows.length > 0 ? btn.actor : null));
         if (!btn || btn.windows.length === 0) return;
-        this._xdndTimer.set(XDND_HOVER_DELAY, () => {
-            if (this._xdndHover !== btn || btn.destroyed) return;
-            if (btn.windows.length === 1) this.activateWindow(btn.windows[0]);
-            else this.flyout.open(btn, true);
+        this._xdndTimer.set(this.xdndDelay, () => {
+            if (this._xdndKey !== btn || btn.destroyed) return;
+            if (btn.windows.length === 1) {
+                this.flyout.close(true);
+                this.activateWindow(btn.windows[0]);
+            } else {
+                this.flyout.open(btn, false);
+            }
         });
     }
 

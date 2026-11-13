@@ -122,3 +122,6 @@ msgstr "Só a janela (as outras somem)"
 
 msgid "Above the other windows"
 msgstr "Acima das outras janelas"
+
+msgid "Delay before bringing a window forward while dragging an item over it"
+msgstr "Atraso para trazer uma janela à frente ao arrastar um item sobre ela"
