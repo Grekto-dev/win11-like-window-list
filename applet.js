@@ -6,7 +6,7 @@ const Settings = imports.ui.settings;
 const DND = imports.ui.dnd;
 const { Clutter, St, GLib, Gio, Gtk, Cinnamon } = imports.gi;
 
-const { tr } = require('./i18n');
+const { tr, setLanguage } = require('./i18n');
 const { Timer, normalizeId } = require('./util');
 const { TaskButton } = require('./taskButton');
 const { Flyout } = require('./flyout');
@@ -109,6 +109,7 @@ class Win11WindowList extends Applet.Applet {
         this.actor.set_style('padding: 0; margin: 0;');
 
         this._bindSettings();
+        setLanguage(this.language);
         this._computeMetrics();
 
         this.box = new St.BoxLayout({
@@ -138,6 +139,7 @@ class Win11WindowList extends Applet.Applet {
         const s = this.settings;
         s.bindProperty(BOTH, 'pinned-apps', 'pinnedApps', () => this._queueRefresh());
         s.bindProperty(BOTH, 'pinned-imported', 'pinnedImported', null);
+        s.bindProperty(IN, 'language', 'language', () => this._onLanguageChanged());
         s.bindProperty(IN, 'show-all-workspaces', 'showAllWorkspaces', () => this._queueRefresh());
         s.bindProperty(IN, 'show-all-monitors', 'showAllMonitors', () => this._queueRefresh());
         s.bindProperty(IN, 'sync-monitors', 'syncMonitors', () => this._applySync());
@@ -231,10 +233,53 @@ class Win11WindowList extends Applet.Applet {
         this.box[prop] = Math.round(this.box[prop] + delta);
     }
 
+    // ----------------------------------------------------------------- language
+
+    _onLanguageChanged() {
+        if (this.destroyed) return;
+        setLanguage(this.language);
+        this.menu.close(true);
+        this._syncLocale();
+    }
+
+    // The settings window is a separate program that finds translations in ~/.local/share/locale.
+    // Portuguese: put our compiled catalogue there; English: remove it, so a Portuguese system does not
+    // translate a window the user chose to see in English.
+    _syncLocale() {
+        const uuid = this.metadata.uuid;
+        const rel = ['locale', 'pt_BR', 'LC_MESSAGES', uuid + '.mo'];
+        const src = Gio.File.new_for_path(GLib.build_filenamev([this.metadata.path].concat(rel)));
+        const dest = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_data_dir()].concat(rel)));
+        try {
+            if (this.language !== 'pt-BR') {
+                if (dest.query_exists(null)) dest.delete(null);
+                return;
+            }
+            if (!src.query_exists(null)) return;
+            GLib.mkdir_with_parents(dest.get_parent().get_path(), 0o755);
+            src.copy(dest, Gio.FileCopyFlags.OVERWRITE, null, null);
+        } catch (e) {
+            global.logError('win11-window-list: locale sync failed: ' + e);
+        }
+    }
+
+    // Opens the settings window in the applet's own language, whatever the system language is.
+    configureApplet(tab = 0) {
+        this._syncLocale();
+        try {
+            const env = GLib.environ_setenv(GLib.get_environ(), 'LANGUAGE', this.language === 'pt-BR' ? 'pt_BR' : 'en', true);
+            GLib.spawn_async(null, ['xlet-settings', 'applet', this.metadata.uuid, '-i', String(this.instance_id), '-t', String(tab)],
+                env, GLib.SpawnFlags.SEARCH_PATH, null);
+        } catch (e) {
+            super.configureApplet(tab);
+        }
+    }
+
     // -------------------------------------------------------------- applet hooks
 
     on_applet_added_to_panel() {
         this._importPinned();
+        this._syncLocale();
         this._connectGlobals();
         global.display.list_windows(0).forEach(w => this._watchWindow(w));
         this._applySync(true);

@@ -25,6 +25,8 @@ unless stated otherwise.
 
 ## Behaviour (additions measured later in the same VM)
 
+- **Aero Peek from the thumbnail.** Hovering the button opens the flyout; resting the pointer on a *card* for ~0.4 s (the "Delay before peeking" setting) fades every other window out (~120 ms) and shows only that window, in place, with the wallpaper and desktop icons visible; this also works for a minimized window (it stays minimized). The flyout stays on top. Moving to another card of the same flyout crossfades (~130 ms) with no new delay and no moment where all windows come back; leaving the cards, or clicking one (which activates the window), ends the peek (others fade back ~120 ms). Closing the flyout always ends it. Measured on frames `pkA`/`pkB` (4 fps captures), so the fade lengths are approximations.
+
 - **Pinned and running buttons mix freely.** An unpinned running app can sit between pinned ones; a new window's app is appended at the end, a newly pinned app goes after the nearest earlier pinned one.
 - **Drag to reorder.** Starts after the usual few pixels of movement. The tile and indicator vanish; the icon alone follows the pointer along the bar only (it never leaves it), slightly enlarged (~1.2x, approximation). Neighbours slide aside (~250 ms, ease-out) when the icon reaches their tile. On release the icon settles into its slot (~200 ms). Esc during the drag does nothing (the drag continues and drops on release). Releasing outside the bar still drops into the slot shown.
 - **New button.** The group recentres as the slot opens (~180 ms), then the icon rises into place (~160 ms). **Closing:** the icon drops and fades (~130 ms) and the slot collapses (~200 ms).

@@ -1,0 +1,112 @@
+# Brazilian Portuguese strings for the settings window of Win11-Like Window List.
+# Same license as the applet (GPL-3.0-or-later).
+msgid ""
+msgstr ""
+"Project-Id-Version: win11-window-list@cinnamon\n"
+"PO-Revision-Date: 2026-11-13 12:00-0300\n"
+"Last-Translator: Grekto-dev\n"
+"Language-Team: pt_BR\n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid "General"
+msgstr "Geral"
+
+msgid "Monitors"
+msgstr "Monitores"
+
+msgid "Hover and animations"
+msgstr "Passar o mouse e animações"
+
+msgid "Jump list and badges"
+msgstr "Lista de atalhos e selos"
+
+msgid "Language"
+msgstr "Idioma"
+
+msgid "Icons"
+msgstr "Ícones"
+
+msgid "Windows"
+msgstr "Janelas"
+
+msgid "Several monitors"
+msgstr "Vários monitores"
+
+msgid "Thumbnails"
+msgstr "Miniaturas"
+
+msgid "Animations"
+msgstr "Animações"
+
+msgid "Jump list (right click)"
+msgstr "Lista de atalhos (botão direito)"
+
+msgid "Button decorations"
+msgstr "Decorações do botão"
+
+msgid "Language of the applet and its settings"
+msgstr "Idioma do applet e das suas configurações"
+
+msgid "The settings window uses the new language the next time it is opened."
+msgstr "A janela de configurações usa o novo idioma na próxima vez que for aberta."
+
+msgid "Show windows from all workspaces"
+msgstr "Mostrar janelas de todas as áreas de trabalho"
+
+msgid "Show windows from all monitors (off: only this monitor's windows)"
+msgstr "Mostrar janelas de todos os monitores (desligado: só as janelas deste monitor)"
+
+msgid "Synchronise monitors: every bar with this option shows the same windows, order and pinned apps"
+msgstr "Sincronizar monitores: toda barra com esta opção mostra as mesmas janelas, ordem e apps fixados"
+
+msgid "Use when the applet is on the panels of more than one monitor."
+msgstr "Use quando o applet estiver nos painéis de mais de um monitor."
+
+msgid "Super+1…9 activates the Nth button (Super+Shift+N opens a new window)"
+msgstr "Super+1…9 ativa o N-ésimo botão (Super+Shift+N abre uma nova janela)"
+
+msgid "Icon size"
+msgstr "Tamanho dos ícones"
+
+msgid "Automatic (follows the taskbar size)"
+msgstr "Automático (acompanha o tamanho da barra)"
+
+msgid "Manual"
+msgstr "Manual"
+
+msgid "Manual icon size (at most the taskbar size)"
+msgstr "Tamanho manual dos ícones (no máximo o tamanho da barra)"
+
+msgid "Accent colour of the focused-window indicator"
+msgstr "Cor de destaque do indicador da janela em foco"
+
+msgid "Delay before the thumbnail flyout opens"
+msgstr "Atraso até abrir a miniatura"
+
+msgid "Peek at a window while hovering its thumbnail (other windows are hidden)"
+msgstr "Espiar a janela ao passar o mouse na miniatura (as outras janelas somem)"
+
+msgid "Delay before peeking"
+msgstr "Atraso até espiar"
+
+msgid "Animate buttons, indicators and flyouts"
+msgstr "Animar botões, indicadores e miniaturas"
+
+msgid "Bounce the icon while an app is launching"
+msgstr "Pular o ícone enquanto um app abre"
+
+msgid "Show recent files in the jump list (follows the system privacy setting)"
+msgstr "Mostrar arquivos recentes na lista de atalhos (segue a configuração de privacidade do sistema)"
+
+msgid "Recent files shown"
+msgstr "Arquivos recentes exibidos"
+
+msgid "Show the notification count on the button"
+msgstr "Mostrar a contagem de notificações no botão"
+
+msgid "Show a progress bar on the button while an app reports progress"
+msgstr "Mostrar uma barra de progresso no botão enquanto um app informa progresso"

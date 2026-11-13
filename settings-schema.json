@@ -5,7 +5,7 @@
         "general": {
             "type": "page",
             "title": "General",
-            "sections": ["general-look", "general-windows"]
+            "sections": ["general-language", "general-look", "general-windows"]
         },
         "monitors": {
             "type": "page",
@@ -21,6 +21,11 @@
             "type": "page",
             "title": "Jump list and badges",
             "sections": ["extras-jump", "extras-badges"]
+        },
+        "general-language": {
+            "type": "section",
+            "title": "Language",
+            "keys": ["language"]
         },
         "general-look": {
             "type": "section",
@@ -65,6 +70,16 @@
     "pinned-imported": {
         "type": "generic",
         "default": false
+    },
+    "language": {
+        "type": "combobox",
+        "default": "en",
+        "description": "Language of the applet and its settings",
+        "tooltip": "The settings window uses the new language the next time it is opened.",
+        "options": {
+            "English": "en",
+            "Português (Brasil)": "pt-BR"
+        }
     },
     "show-all-workspaces": {
         "type": "switch",
@@ -124,11 +139,11 @@
     "enable-peek": {
         "type": "switch",
         "default": true,
-        "description": "Peek at a window while hovering its thumbnail"
+        "description": "Peek at a window while hovering its thumbnail (other windows are hidden)"
     },
     "peek-delay": {
         "type": "spinbutton",
-        "default": 500,
+        "default": 400,
         "min": 0,
         "max": 2000,
         "step": 50,

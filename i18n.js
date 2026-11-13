@@ -1,25 +1,8 @@
-// Strings shown in the jump list. Windows 11 labels, in the user's language.
-const GLib = imports.gi.GLib;
+// Strings shown by the applet itself (the jump list). English is the default; Brazilian Portuguese is
+// the other choice, picked in the applet settings (independent of the system language).
+// Strings of the settings window come from po/pt_BR.po (see applet.js: configureApplet).
 
 const TABLE = {
-    pt: {
-        tasks: 'Tarefas',
-        recent: 'Recente',
-        pin: 'Fixar na barra de tarefas',
-        unpin: 'Desafixar da barra de tarefas',
-        close: 'Fechar janela',
-        closeAll: 'Fechar todas as janelas',
-        newWindow: 'Nova janela',
-    },
-    es: {
-        tasks: 'Tareas',
-        recent: 'Reciente',
-        pin: 'Anclar a la barra de tareas',
-        unpin: 'Desanclar de la barra de tareas',
-        close: 'Cerrar ventana',
-        closeAll: 'Cerrar todas las ventanas',
-        newWindow: 'Nueva ventana',
-    },
     en: {
         tasks: 'Tasks',
         recent: 'Recent',
@@ -29,21 +12,29 @@ const TABLE = {
         closeAll: 'Close all windows',
         newWindow: 'New window',
     },
+    'pt-BR': {
+        tasks: 'Tarefas',
+        recent: 'Recente',
+        pin: 'Fixar na barra de tarefas',
+        unpin: 'Desafixar da barra de tarefas',
+        close: 'Fechar janela',
+        closeAll: 'Fechar todas as janelas',
+        newWindow: 'Nova janela',
+    },
 };
 
-function pickLanguage() {
-    const names = GLib.get_language_names();
-    for (let i = 0; i < names.length; i++) {
-        const lang = names[i].split(/[_.@-]/)[0];
-        if (TABLE[lang]) return lang;
-    }
-    return 'en';
+let current = 'en';
+
+function setLanguage(lang) {
+    current = TABLE[lang] ? lang : 'en';
 }
 
-const LANG = pickLanguage();
+function getLanguage() {
+    return current;
+}
 
 function tr(key) {
-    return (TABLE[LANG] && TABLE[LANG][key]) || TABLE.en[key] || key;
+    return (TABLE[current] && TABLE[current][key]) || TABLE.en[key] || key;
 }
 
-module.exports = { tr };
+module.exports = { tr, setLanguage, getLanguage };

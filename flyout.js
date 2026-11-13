@@ -1,5 +1,5 @@
 // Thumbnail flyout shown above a taskbar button (Windows 11 "preview cards").
-const { Clutter, St, Pango } = imports.gi;
+const { Clutter, St, Pango, Meta, Cinnamon } = imports.gi;
 const Main = imports.ui.main;
 const WindowUtils = imports.misc.windowUtils;
 
@@ -22,9 +22,13 @@ class Flyout {
         this.listMode = false;
         this._cards = new Map();   // MetaWindow -> {card, label}
         this._closeTimer = new Timer();
-        this._peekTimer = new Timer();
+        this._peekTimer = new Timer();      // delay before the first peek
+        this._peekEndTimer = new Timer();   // grace period while the pointer crosses between cards
         this._peekClone = null;
         this._peekWindow = null;
+        this._peeking = false;
+        this._hidden = [];                  // [windowActor, original opacity] hidden during a peek
+        this._clones = new Set();           // every peek clone we created (crossfades overlap)
         this._captureId = 0;
         this._grabbed = false;
     }
@@ -102,7 +106,8 @@ class Flyout {
     close(immediate) {
         this._closeTimer.clear();
         this._peekTimer.clear();
-        this._unpeek(true);
+        this._peekEndTimer.clear();
+        this._endPeek();
         this._disarmOutside();
         this.sticky = false;
         this.button = null;
@@ -139,7 +144,7 @@ class Flyout {
         const wasList = this.listMode;
         this.listMode = windows.length > perRow;
 
-        this._unpeek(true);
+        this._endPeek();
         this._cards.clear();
         this.actor.destroy_all_children();
         this.actor.set_vertical(this.listMode);
@@ -208,8 +213,7 @@ class Flyout {
         });
         card.connect('notify::hover', () => {
             if (!always) close.opacity = card.hover ? 255 : 0;
-            if (card.hover) this._schedulePeek(w);
-            else this._cancelPeek(w);
+            this._onCardHover(w, card.hover);
         });
     }
 
@@ -278,50 +282,148 @@ class Flyout {
     }
 
     // -------------------------------------------------------------------- peek
+    // Windows 11 "Aero Peek" (measured in the VM, see docs/REFERENCE.md): with the pointer on a thumbnail
+    // card for ~0.4 s every other window disappears at once and only that window is shown, in place,
+    // even if it is minimized; moving to another card of the same flyout crossfades (~130 ms) without a
+    // new delay; leaving the cards restores everything immediately. The desktop stays visible.
 
-    _schedulePeek(w) {
+    _onCardHover(w, hovered) {
         if (!this.applet.enablePeek) return;
-        this._peekTimer.set(this.applet.peekDelay, () => this._peek(w));
+        if (hovered) {
+            this._peekEndTimer.clear();
+            if (this._peeking) this._switchPeek(w);
+            else this._peekTimer.set(this.applet.peekDelay, () => this._beginPeek(w));
+        } else {
+            this._peekTimer.clear();
+            if (this._peeking) this._peekEndTimer.set(70, () => this._endPeek());
+        }
     }
 
-    _cancelPeek(w) {
-        this._peekTimer.clear();
-        if (this._peekWindow === w) this._unpeek(false);
-    }
-
-    _peek(w) {
-        this._unpeek(true);
+    _canPeek(w) {
         const actor = w.get_compositor_private();
-        if (!actor) return;
+        if (!actor) return false;
+        return w.is_on_all_workspaces() || w.get_workspace() === global.workspace_manager.get_active_workspace();
+    }
+
+    _makeClone(w) {
+        const actor = w.get_compositor_private();
         const clone = WindowUtils.getCloneOrContent(actor);
-        if (!clone) return;
-        const [x, y] = actor.get_position();
-        const [cw, ch] = actor.get_size();
+        if (!clone) return null;
+        const r = w.get_buffer_rect();
+        const [aw, ah] = actor.get_size();
+        clone.set_position(r.x, r.y);
+        clone.set_size(aw, ah);
         clone.opacity = 0;
-        clone.set_position(x, y);
-        clone.set_size(cw, ch);
+        Cinnamon.util_set_hidden_from_pick(clone, true);
         global.overlay_group.add_child(clone);
         global.overlay_group.set_child_above_sibling(clone, null);
-        clone.ease({ opacity: 255, duration: this.applet.animate ? 150 : 0, mode: EASE_OUT });
-        this._peekClone = clone;
-        this._peekWindow = w;
+        this._clones.add(clone);
+        return clone;
     }
 
-    _unpeek(immediate) {
-        const clone = this._peekClone;
-        this._peekClone = null;
-        this._peekWindow = null;
+    _fadeMs() {
+        return this.applet.animate ? 120 : 0;
+    }
+
+    _hideActor(a) {
+        if (!a) return;
+        const ms = this._fadeMs();
+        if (!this._hidden.some(([x]) => x === a)) {
+            if (a.opacity === 0) return;                 // already invisible for other reasons
+            if (a._wlPeekOpacity === undefined) a._wlPeekOpacity = a.opacity;
+            this._hidden.push([a, a._wlPeekOpacity]);
+        }
+        a.remove_all_transitions();
+        if (ms) a.ease({ opacity: 0, duration: ms, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
+        else a.opacity = 0;
+    }
+
+    _hideOthers(target) {
+        const targetActor = target.get_compositor_private();
+        global.get_window_actors().forEach(a => {
+            const type = a.meta_window.get_window_type();
+            if (a === targetActor || type === Meta.WindowType.DESKTOP || type === Meta.WindowType.DOCK) return;
+            if (a.meta_window.is_override_redirect()) return;   // menus, tooltips
+            this._hideActor(a);
+        });
+    }
+
+    _fadeBack([a, opacity]) {
+        const ms = this._fadeMs();
+        try {
+            a.remove_all_transitions();
+            const done = () => { delete a._wlPeekOpacity; };
+            if (ms) a.ease({ opacity: opacity, duration: ms, mode: Clutter.AnimationMode.EASE_OUT_QUAD, onComplete: done });
+            else { a.opacity = opacity; done(); }
+        } catch (e) { /* window closed while peeking */ }
+    }
+
+    _restoreOthers() {
+        const hidden = this._hidden;
+        this._hidden = [];
+        hidden.forEach(entry => this._fadeBack(entry));
+    }
+
+    _beginPeek(w) {
+        if (!this.isOpen || this._peeking || !this._canPeek(w)) return;
+        const clone = this._makeClone(w);
         if (!clone) return;
-        const done = () => {
+        this._peeking = true;
+        this._peekWindow = w;
+        this._peekClone = clone;
+        const ms = this._fadeMs();
+        if (ms) clone.ease({ opacity: 255, duration: ms, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
+        else clone.opacity = 255;
+        this._hideOthers(w);
+    }
+
+    _switchPeek(w) {
+        if (w === this._peekWindow) return;
+        if (!this._canPeek(w)) return;
+        const old = this._peekClone;
+        const clone = this._makeClone(w);
+        if (!clone) return;
+        // Only the two windows involved change: the new target is shown, the old one is hidden.
+        const newActor = w.get_compositor_private();
+        const keep = [];
+        this._hidden.forEach(entry => {
+            if (entry[0] === newActor) this._fadeBack(entry);
+            else keep.push(entry);
+        });
+        this._hidden = keep;
+        this._hideActor(this._peekWindow && this._peekWindow.get_compositor_private());
+        this._peekWindow = w;
+        this._peekClone = clone;
+        const ms = this.applet.animate ? 130 : 0;
+        clone.ease({ opacity: 255, duration: ms, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
+        if (old) {
+            old.ease({
+                opacity: 0,
+                duration: ms,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                onComplete: () => this._dropClone(old),
+            });
+            if (!ms) this._dropClone(old);
+        }
+        if (!ms) clone.opacity = 255;
+    }
+
+    _dropClone(clone) {
+        this._clones.delete(clone);
+        try {
+            clone.remove_all_transitions();
             if (clone.get_parent()) clone.get_parent().remove_child(clone);
             clone.destroy();
-        };
-        if (immediate || !this.applet.animate) {
-            clone.remove_all_transitions();
-            done();
-        } else {
-            clone.ease({ opacity: 0, duration: 100, mode: EASE_OUT, onComplete: done });
-        }
+        } catch (e) { /* already gone */ }
+    }
+
+    _endPeek() {
+        this._peekEndTimer.clear();
+        this._peekClone = null;
+        this._peekWindow = null;
+        this._peeking = false;
+        this._restoreOthers();
+        Array.from(this._clones).forEach(c => this._dropClone(c));
     }
 
     // -------------------------------------------- sticky flyout: outside click / Esc

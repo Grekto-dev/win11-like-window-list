@@ -10,6 +10,8 @@ Internal identifier: `win11-window-list@cinnamon`. Geometry, colours and behavio
 - **Running indicator**: 6×3 grey pill for a running app, 16×3 accent pill for the focused window, none for a pinned app that is not running.
 - **Several windows of one app**: the tile narrows and a second tile peeks out on its right.
 - **Pinned apps**: pinned and running buttons mix freely, as on Windows; pin from the jump list, by dragging an app from the Start menu onto the bar (an empty slot opens where it will land), or by dragging. On first run the pins of Cinnamon's *Grouped window list* are imported.
+- **Peek**: with the pointer on a thumbnail card for ~0.4 s every other window fades away and only that window is shown in place (also if it is minimized); moving to another card crossfades; leaving the cards restores everything. Can be switched off or its delay changed.
+- **Language**: English (default) or Brazilian Portuguese, chosen in the settings; it covers the jump list and the settings window itself (`po/pt_BR.po`, compiled with `scripts/build-locale.sh`; the applet installs the catalogue under `~/.local/share/locale` only while Portuguese is selected).
 - **Drag to reorder**: only the icon follows the pointer (enlarged, along the bar), neighbours slide aside, the icon settles on release; Esc does nothing, like Windows. Holding a file dragged from another window over a button brings that app forward after 1 s.
 - **Icon size**: *Automatic* follows the bar (half its thickness, 24 px on a 48 px bar) or *Manual* (16 px up to the bar's size).
 - **Several monitors**: *Synchronise monitors* makes every bar that has it on show the same windows, order and pinned apps.

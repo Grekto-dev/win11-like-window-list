@@ -70,6 +70,9 @@ function revealFromPanel(applet, actor, duration, mode, onDone) {
         actor.translation_x = 0;
         actor.translation_y = 0;
         actor.opacity = 255;
+        // Cinnamon computes the stage input region while the actor is still translated under the panel;
+        // without this the final position gets no enter/leave events (hover, peek) until the next change.
+        Main.layoutManager._chrome.updateRegions();
         if (onDone) onDone();
     };
     if (!applet.animate || duration <= 0 || !applet.panel) {
