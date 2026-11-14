@@ -12,7 +12,7 @@ Internal identifier: `win11-window-list@cinnamon`. Geometry, colours and behavio
 - **Pinned apps**: pinned and running buttons mix freely, as on Windows; pin from the jump list, by dragging an app from the Start menu onto the bar (an empty slot opens where it will land), or by dragging. On first run the pins of Cinnamon's *Grouped window list* are imported.
 - **Peek**: with the pointer on a thumbnail card for ~0.4 s the window is previewed in place (also if it is minimized); moving to another card crossfades; leaving the cards ends it. Two styles in the settings: *Only the window* (every other window fades away, the window appears alone over the desktop) or *Above the other windows* (nothing is hidden; the window is drawn over whatever is on screen). Can be switched off or its delay changed.
 - **Settings apply at once**: no reload and no *Apply* button; the language too (an open settings window reopens by itself in the new language).
-- **Language**: English (default) or Brazilian Portuguese, chosen in the settings; it covers the jump list and the settings window itself (`po/pt_BR.po`, compiled with `scripts/build-locale.sh`; the applet installs the catalogue under `~/.local/share/locale` only while Portuguese is selected).
+- **Language**: English (default) or Brazilian Portuguese, chosen in the settings; it covers the jump list (including app names and actions taken from the `.desktop` files), the applet's right-click menu and the settings window itself, on every bar (`po/pt_BR.po`, compiled with `scripts/build-locale.sh`; the applet installs the catalogue under `~/.local/share/locale` only while Portuguese is selected).
 - **Drag to reorder**: only the icon follows the pointer (enlarged, along the bar), neighbours slide aside, the icon settles on release; Esc does nothing, like Windows. Holding a file dragged from another window over a button brings that app's window forward (delay adjustable, 400 ms by default); over a button with several windows the thumbnails open and holding the file over one of them raises that window, so files can be dragged between two windows of the same app.
 - **Icon size**: *Automatic* follows the bar (half its thickness, 24 px on a 48 px bar) or *Manual* (16 px up to the bar's size).
 - **Several monitors**: *Synchronise monitors* (on by default) makes every bar of the applet show the same windows, order and pinned apps: moving, pinning or unpinning on one monitor changes the others.
@@ -51,7 +51,7 @@ Then add **Win11-Like Window List** in *System Settings → Applets*. Remove or 
 ```bash
 python3 tests/static_check.py          # syntax, settings schema, translations (no Cinnamon needed)
 python3 tests/live_suite.py            # ~100 checks against a running Cinnamon session (see below)
-python3 tests/live_suite.py flyout art # only some sections: health lifecycle settings windows closing flyout art pin sync attention menu launcher xdnd language liveapply languagelive
+python3 tests/live_suite.py flyout art # only some sections: health lifecycle settings windows closing flyout art pin sync attention menu launcher xdnd language liveapply languagelive languageall progress
 ```
 
 The live suite drives the real shell (D-Bus `org.Cinnamon.Eval`, XTEST pointer and keys, small GTK test windows and, for the drag test, Nemo). It restores the applet settings and your pinned apps, but run it on a session you are not working in: it moves the pointer, opens windows and reloads the applet. Reloads are also checked for leaks.

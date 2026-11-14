@@ -1,3 +1,9 @@
+## 1.0.4
+
+- **Language is now one setting for the whole applet.** Before, each bar had its own copy: changing it in the settings of one monitor left the other bar (and its jump list) in the old language. A change on any bar is applied to all of them at once.
+- **Every text follows the applet's language, not the system's:** app names and the actions of the jump list (e.g. *Home / Computer / Trash* or *Pasta pessoal / Computador / Lixeira*) are read from the `.desktop` file in the chosen language, and the applet's right-click menu (*About / Configure / Remove*) is relabelled. Previously these stayed in the system language.
+- Tests: `languageall` (several bars, desktop-file names, right-click menu) and `progress` (taskbar progress bar and indeterminate sweep) sections; `tests/helpers/reload.sh`.
+
 ## 1.0.3
 
 - **Every setting now applies the moment it is changed**, including the language: the jump list switches at once and, if the settings window is open, it closes and reopens by itself in the new language (opening *Configure* twice just raises the existing window).

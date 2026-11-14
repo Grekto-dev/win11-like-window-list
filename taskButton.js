@@ -4,6 +4,7 @@
 const { Clutter, St, GLib } = imports.gi;
 
 const { TileArt } = require('./tileArt');
+const { appName } = require('./util');
 
 const EASE_OUT = Clutter.AnimationMode.EASE_OUT_QUAD;
 const EASE_CUBIC = Clutter.AnimationMode.EASE_OUT_CUBIC;
@@ -135,7 +136,7 @@ class TaskButton {
     }
 
     get name() {
-        return this.app ? this.app.get_name() : this.fallbackName;
+        return this.app ? appName(this.app, this.applet.language) : this.fallbackName;
     }
 
     // ---------------------------------------------------------------- geometry

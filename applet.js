@@ -7,7 +7,7 @@ const DND = imports.ui.dnd;
 const { Clutter, St, GLib, Gio, Gtk, Cinnamon } = imports.gi;
 
 const { tr, setLanguage } = require('./i18n');
-const { Timer, normalizeId } = require('./util');
+const { Timer, normalizeId, actionName } = require('./util');
 const { TaskButton } = require('./taskButton');
 const { Flyout } = require('./flyout');
 const { ContextMenu } = require('./contextMenu');
@@ -147,7 +147,7 @@ class Win11WindowList extends Applet.Applet {
         });
         this._pinnedJson = JSON.stringify(this.pinnedApps);
         s.bindProperty(BOTH, 'pinned-imported', 'pinnedImported', null);
-        s.bindProperty(IN, 'language', 'language', () => this._onLanguageChanged());
+        s.bindProperty(BOTH, 'language', 'language', () => this._onLanguageChanged());
         s.bindProperty(IN, 'show-all-workspaces', 'showAllWorkspaces', () => this._queueRefresh());
         s.bindProperty(IN, 'show-all-monitors', 'showAllMonitors', () => this._queueRefresh());
         s.bindProperty(IN, 'sync-monitors', 'syncMonitors', () => this._applySync());
@@ -250,12 +250,39 @@ class Win11WindowList extends Applet.Applet {
 
     // ----------------------------------------------------------------- language
 
+    // The language is one setting for the whole applet: a change on any bar is copied to the others.
     _onLanguageChanged() {
+        if (this.destroyed) return;
+        this._applyLanguage();
+        imports.ui.appletManager.getRunningInstancesForUuid(this.metadata.uuid).forEach(a => {
+            if (a === this || a.destroyed || a.language === this.language) return;
+            a.language = this.language;           // bidirectional: also saved in that bar's settings file
+            a._applyLanguage();
+        });
+    }
+
+    // Everything that shows text follows the new language at once.
+    _applyLanguage() {
         if (this.destroyed) return;
         setLanguage(this.language);
         this.menu.close(true);
+        this.flyout.close(true);
+        this.tip.hide(true);
         this._syncLocale();
+        this._relabelContextMenu();
         this._reopenSettingsWindow();
+    }
+
+    // Cinnamon builds the right-click menu of every applet in the system language.
+    _relabelContextMenu() {
+        const set = (item, text) => {
+            try {
+                if (item && item.label) item.label.set_text(text);
+            } catch (e) { /* menu not built yet */ }
+        };
+        set(this.context_menu_item_about, tr('about'));
+        set(this.context_menu_item_configure, tr('configure'));
+        set(this.context_menu_item_remove, tr('remove').replace('%s', this.metadata.name));
     }
 
     // The settings window of this bar, if open: the one we started (by pid) or, when it was opened from
@@ -329,6 +356,10 @@ class Win11WindowList extends Applet.Applet {
     // -------------------------------------------------------------- applet hooks
 
     on_applet_added_to_panel() {
+        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._relabelContextMenu();
+            return GLib.SOURCE_REMOVE;
+        });
         this._importPinned();
         this._syncLocale();
         this._connectGlobals();
@@ -1192,7 +1223,7 @@ class Win11WindowList extends Applet.Applet {
                 items.push({ kind: 'header', label: tr('tasks') });
                 actions.forEach(a => items.push({
                     kind: 'item',
-                    label: info.get_action_name(a),
+                    label: actionName(info, a, this.language),
                     icon: null,
                     activate: () => {
                         try {

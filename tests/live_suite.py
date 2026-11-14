@@ -404,12 +404,12 @@ def s_attention():
     seen = []
     t0 = time.time()
     while time.time() - t0 < 6.5:
-        seen.append(evj("(()=>{let b=%s;return b?{att:b.attention,fo:Math.round(b.flash.opacity),w:Math.round(b.flash.get_width())}:null})()" % button('win:WlTest')))
+        seen.append(evj("(()=>{let b=%s;return b?{att:b.attention,fo:Math.round(b.flash.opacity),w:Math.round(b.flash.get_width()),want:%s.metrics.tileW-%s.metrics.stackInset}:null})()" % (button('win:WlTest'), A, A)))
         time.sleep(.15)
     att = [x for x in seen if x and x['att']]
     check('urgency hint marks the button', att, (len(seen), seen[:2], seen[-2:]))
     check('flash pulses', att and max(x['fo'] for x in att) > 100, att[:2])
-    check('flash follows the (shorter) front tile of a stack', att and {x['w'] for x in att} == {35}, att[:1])
+    check('flash follows the (shorter) front tile of a stack', att and {x['w'] for x in att} == {att[0]['want']}, att[:1])
     activate('win:WlTest'); time.sleep(1)
     check('attention clears when the app is focused', evj("%s.attention" % button('win:WlTest')) is False)
     close_windows()
@@ -624,7 +624,10 @@ def s_liveapply():
         check('icon size manual 24 applies', evj("%s.metrics.icon" % A) == 24)
         set_cfg(icon_size_mode='auto')
         # accent colour of the focused indicator
-        activate('win:WlTest')
+        for _ in range(3):
+            activate('win:WlTest')
+            if wait(lambda: ev("''+%s.focused" % btnjs('win:WlTest')) == 'true', 2):
+                break
         set_cfg(indicator_color='rgb(255,0,0)')
         check('indicator colour applies', 'rgb(255,0,0)' in (ev("%s.indicator.get_style()" % btnjs('win:WlTest')) or ''), ev("%s.indicator.get_style()" % btnjs('win:WlTest')))
         # animations
@@ -803,12 +806,103 @@ def s_language_live():
     check('no errors logged while switching language', not errs, errs[:3])
 
 
+
+def s_language_all():
+    print('\n== language: one setting for every bar, and every text follows it')
+    off = log_offset()
+    import configparser
+    insts = [int(i) for i in (evj("%s.map(a=>a.instance_id)" % _LIST) or [])]
+    I = lambda n: "%s.find(a=>a.instance_id==%d)" % (_LIST, n)
+    saved = {n: (SETTINGS / ('%d.json' % n)).read_text() for n in insts}
+    def write(n, lang):
+        d = json.loads((SETTINGS / ('%d.json' % n)).read_text()); d['language']['value'] = lang
+        (SETTINGS / ('%d.json' % n)).write_text(json.dumps(d, indent=4))
+        ev("%s.settings.remoteUpdate('x',null)" % I(n)); time.sleep(1.5)
+    def menu_texts(n, id_):
+        ev("(()=>{let a=%s;a.menu.close(true);a.flyout.close(true);a.openMenu(a.liveButtons().find(b=>b.id==='%s'));return 1})()" % (I(n), id_)); time.sleep(.7)
+        t = ev("(()=>{let a=%s;let out=[];let walk=x=>{try{if(x.get_text&&x.get_text()&&out.indexOf(x.get_text())<0)out.push(x.get_text())}catch(e){}x.get_children&&x.get_children().forEach(walk)};walk(a.menu.actor);return JSON.stringify(out)})()" % I(n))
+        ev("%s.menu.close(true)" % I(n)); return json.loads(t.replace('\\"', '"')) if t.startswith('[') else []
+    def ctx(n):
+        raw = ev("JSON.stringify(%s._applet_context_menu._getMenuItems().map(i=>i.label?i.label.get_text():'-'))" % I(n))
+        try:
+            return json.loads(raw[raw.index('['):raw.rindex(']') + 1])
+        except Exception:
+            return []
+    try:
+        for lang, about in (('pt-BR', 'Sobre...'), ('en', 'About...')):
+            write(insts[0], lang)
+            for n in insts:
+                check('bar %d follows the language set on bar %d (%s)' % (n, insts[0], lang), ev("''+%s.language" % I(n)) == lang)
+                check('bar %d right-click menu is in %s' % (n, lang), (ctx(n) or ['?'])[0] == about, ctx(n))
+            # app-provided names follow the applet's language, not the system's
+            for n in insts[:1]:
+                for b in evj("%s.liveButtons().filter(b=>b.app&&b.app.get_app_info()&&b.app.get_app_info().list_actions().length>0).map(b=>[b.id,b.app.get_app_info().get_filename(),b.app.get_app_info().list_actions()])" % I(n)) or []:
+                    cp = configparser.RawConfigParser(strict=False); cp.optionxform = str
+                    try:
+                        cp.read(b[1], encoding='utf8')
+                    except Exception:
+                        continue
+                    texts = menu_texts(n, b[0])
+                    for act in b[2]:
+                        sec = 'Desktop Action ' + act
+                        want = cp.get(sec, 'Name' if lang == 'en' else ('Name[pt_BR]' if cp.has_option(sec, 'Name[pt_BR]') else ('Name[pt]' if cp.has_option(sec, 'Name[pt]') else 'Name')), fallback=None)
+                        if want:
+                            check('%s action "%s" shows "%s" in %s' % (b[0][:18], act, want, lang), want in texts, texts[:8])
+    finally:
+        for n, txt in saved.items():
+            (SETTINGS / ('%d.json' % n)).write_text(txt)
+        for n in insts:
+            ev("%s.settings.remoteUpdate('x',null)" % I(n))
+        time.sleep(1.5)
+        after = [ev("''+%s.language" % I(n)) for n in insts]
+        print('languages after restoring the files:', after)
+    errs = log_since(off)
+    check('no errors logged while switching language on several bars', not errs, errs[:3])
+
+
+
+def s_progress():
+    print('\n== taskbar progress (a program copying or loading something)')
+    off = log_offset()
+    p = subprocess.Popen(['/usr/bin/python3', str(ROOT / 'tests/helpers/progwin.py')], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+    _children.append(p)
+    send = lambda c: (p.stdin.write(c + '\n'), p.stdin.flush())
+    wait(lambda: evj("%s.liveButtons().some(b=>b.id==='win:WlProg')" % A), 8); time.sleep(.8)
+    st = lambda: evj("(()=>{let b=%s.liveButtons().find(b=>b.id==='win:WlProg');return {track:b.track.visible,w:Math.round(b.fill.get_width()),x:Math.round(b.fill.get_transformed_position()[0]-b.track.get_transformed_position()[0]),tw:Math.round(b.track.get_width()),ind:b.indicator.opacity,prog:b.progress,pulse:b.pulse}})()" % A) or {}
+    check('no progress bar while nothing is reported', not st().get('track'))
+    send('40'); time.sleep(.7); s1 = st()
+    check('40 % shows the bar', s1.get('track') and s1.get('prog') == 40, s1)
+    check('the fill is 40 % of the track', s1.get('tw') and abs(s1['w'] - 0.4 * s1['tw']) <= 1.5, s1)
+    check('the running indicator gives way to the bar', s1.get('ind') == 0, s1)
+    send('85'); time.sleep(.7); s2 = st()
+    check('the fill grows with the progress', s2.get('w', 0) > s1.get('w', 0) and abs(s2['w'] - 0.85 * s2['tw']) <= 1.5, s2)
+    set_cfg(show_progress=False); check('show-progress off hides it', not st().get('track'))
+    set_cfg(show_progress=True); check('show-progress on shows it again', st().get('track'))
+    send('pulse'); time.sleep(.3)
+    xs = []
+    for _ in range(14):
+        xs.append(st().get('x')); time.sleep(.12)
+    check('indeterminate progress: a segment sweeps along the track', len(set(xs)) > 4 and max(xs) - min(xs) > 6, xs)
+    send('off'); time.sleep(.7); s3 = st()
+    check('the bar goes away when the program is done', not s3.get('track') and s3.get('ind') == 255, s3)
+    send('quit')
+    close_windows()
+    errs = log_since(off)
+    check('no errors logged by progress', not errs, errs[:3])
+
+
 SECTIONS = [('health', s_health), ('lifecycle', s_lifecycle), ('settings', s_settings_fuzz), ('windows', s_windows), ('closing', s_closing),
-            ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('sync', s_sync), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language), ('liveapply', s_liveapply), ('languagelive', s_language_live)]
+            ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('sync', s_sync), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language), ('liveapply', s_liveapply), ('languagelive', s_language_live), ('languageall', s_language_all), ('progress', s_progress)]
 
 if __name__ == '__main__':
     want = sys.argv[1:]
     bind_instance()
+    snapshot = {f: json.loads(f.read_text()) for f in SETTINGS.glob('*.json')}
+    # The checks read English texts: run in English (the language is one setting for all bars). The
+    # snapshot above is restored at the end, which gives the user's language back.
+    user_lang = ev("''+%s.language" % A)
+    if user_lang and user_lang != 'en':
+        set_cfg(language='en')
     try:
         for name, fn in SECTIONS:
             if not want or name in want:
@@ -816,6 +910,22 @@ if __name__ == '__main__':
     finally:
         close_windows()
         settle()
+    # whatever a section did, every bar's settings must be what they were before the run
+    for f, before in snapshot.items():
+        try:
+            now = json.loads(f.read_text())
+        except Exception:
+            continue
+        diff = [k for k in before if isinstance(before[k], dict) and 'value' in before[k] and now.get(k, {}).get('value') != before[k]['value']]
+        if diff == ['language'] and user_lang:
+            diff = []                      # expected: the run switched to English
+            f.write_text(json.dumps(before, indent=4))
+            ev("imports.ui.appletManager.getRunningInstancesForUuid('%s').find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (UUID, f.stem))
+            time.sleep(1.2)
+        check('settings of bar %s unchanged by the run' % f.stem, not diff, diff)
+        if diff:
+            f.write_text(json.dumps(before, indent=4))
+            ev("imports.ui.appletManager.getRunningInstancesForUuid('%s').find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (UUID, f.stem))
     bad = [n for n, ok in results if not ok]
     print('\n%d checks, %d failed' % (len(results), len(bad)))
     for n in bad:

@@ -11,6 +11,9 @@ const TABLE = {
         close: 'Close window',
         closeAll: 'Close all windows',
         newWindow: 'New window',
+        about: 'About...',
+        configure: 'Configure...',
+        remove: "Remove '%s'",
     },
     'pt-BR': {
         tasks: 'Tarefas',
@@ -20,6 +23,9 @@ const TABLE = {
         close: 'Fechar janela',
         closeAll: 'Fechar todas as janelas',
         newWindow: 'Nova janela',
+        about: 'Sobre...',
+        configure: 'Configurar...',
+        remove: "Remover '%s'",
     },
 };
 
