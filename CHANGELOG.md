@@ -1,3 +1,11 @@
+## 1.0.3
+
+- **Every setting now applies the moment it is changed**, including the language: the jump list switches at once and, if the settings window is open, it closes and reopens by itself in the new language (opening *Configure* twice just raises the existing window).
+- Switching the peek style or turning peek off while a peek is showing takes effect on the running peek; turning *show progress* off hides bars already on screen.
+- Fix: changing any setting used to rebuild the whole bar (Cinnamon reports the pinned list as changed on every write). Now it refreshes only when the pins really differ.
+- Fix: the Portuguese catalogue is kept while another bar still uses Portuguese.
+- Tests: `liveapply` (every option has an immediate effect) and `languagelive` (including the open settings window, read through AT-SPI) sections.
+
 ## 1.0.2
 
 - **Fix: a pinned Flatpak app (e.g. Google Chrome) no longer disappears when its last window closes.** Cinnamon files Flatpak apps under an id with a suffix (`com.google.Chrome.desktop:flatpak`) that the plain lookup missed, so the pin was dropped as soon as the app stopped running.

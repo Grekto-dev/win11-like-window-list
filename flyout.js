@@ -316,6 +316,21 @@ class Flyout {
         }
     }
 
+    // Peek style changed while a peek is showing: show the same window again in the new style.
+    restartPeek() {
+        const w = this._peekWindow;
+        if (!this._peeking || !w) return;
+        this._peekTimer.clear();
+        this._endPeek();
+        this._beginPeek(w);
+    }
+
+    // Called when the peek option is switched off while a peek is showing.
+    endPeekNow() {
+        this._peekTimer.clear();
+        this._endPeek();
+    }
+
     _canPeek(w) {
         const actor = w.get_compositor_private();
         if (!actor) return false;

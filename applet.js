@@ -137,7 +137,15 @@ class Win11WindowList extends Applet.Applet {
         const IN = Settings.BindingDirection.IN;
         const BOTH = Settings.BindingDirection.BIDIRECTIONAL;
         const s = this.settings;
-        s.bindProperty(BOTH, 'pinned-apps', 'pinnedApps', () => this._queueRefresh());
+        // Cinnamon cannot compare list values, so it reports 'pinned-apps' as changed on every settings write:
+        // refresh only when the list really differs, or any other setting would rebuild the whole bar.
+        s.bindProperty(BOTH, 'pinned-apps', 'pinnedApps', () => {
+            const now = JSON.stringify(this.pinnedApps);
+            if (now === this._pinnedJson) return;
+            this._pinnedJson = now;
+            this._queueRefresh();
+        });
+        this._pinnedJson = JSON.stringify(this.pinnedApps);
         s.bindProperty(BOTH, 'pinned-imported', 'pinnedImported', null);
         s.bindProperty(IN, 'language', 'language', () => this._onLanguageChanged());
         s.bindProperty(IN, 'show-all-workspaces', 'showAllWorkspaces', () => this._queueRefresh());
@@ -149,13 +157,18 @@ class Win11WindowList extends Applet.Applet {
         s.bindProperty(IN, 'indicator-color', 'accentColor', () => this._queueStates());
         s.bindProperty(IN, 'hover-delay', 'hoverDelay', null);
         s.bindProperty(IN, 'xdnd-delay', 'xdndDelay', null);
-        s.bindProperty(IN, 'enable-peek', 'enablePeek', null);
-        s.bindProperty(IN, 'peek-mode', 'peekMode', null);
+        s.bindProperty(IN, 'enable-peek', 'enablePeek', () => {
+            if (!this.enablePeek && this.flyout) this.flyout.endPeekNow();
+        });
+        s.bindProperty(IN, 'peek-mode', 'peekMode', () => this.flyout && this.flyout.restartPeek());
         s.bindProperty(IN, 'peek-delay', 'peekDelay', null);
         s.bindProperty(IN, 'enable-animations', 'enableAnimations', null);
         s.bindProperty(IN, 'launch-animation', 'launchAnimation', null);
         s.bindProperty(IN, 'show-badges', 'showBadges', () => this._updateBadges());
-        s.bindProperty(IN, 'show-progress', 'showProgress', () => this._queueStates());
+        s.bindProperty(IN, 'show-progress', 'showProgress', () => this._buttons.forEach(b => {
+            b._applyProgress();
+            b._applyIndicator(false);
+        }));
         s.bindProperty(IN, 'show-recent', 'showRecent', null);
         s.bindProperty(IN, 'recent-count', 'recentCount', null);
     }
@@ -242,6 +255,34 @@ class Win11WindowList extends Applet.Applet {
         setLanguage(this.language);
         this.menu.close(true);
         this._syncLocale();
+        this._reopenSettingsWindow();
+    }
+
+    // The settings window of this bar, if open: the one we started (by pid) or, when it was opened from
+    // System Settings and this is the only bar, the only window of the settings program with our title.
+    _settingsWindow() {
+        const wins = global.display.list_windows(0).filter(w => w.get_wm_class() === 'Xlet-settings.py' && w.get_title() === this.metadata.name);
+        let w = this._settingsPid ? wins.find(x => x.get_pid() === this._settingsPid) : null;
+        if (!w && wins.length === 1 && imports.ui.appletManager.getRunningInstancesForUuid(this.metadata.uuid).length === 1) {
+            w = wins[0];
+            this._settingsPid = w.get_pid();
+        }
+        return w || null;
+    }
+
+    // The settings window is a separate program whose texts are fixed when it starts: if it is open,
+    // close it and open it again in the new language.
+    _reopenSettingsWindow() {
+        const w = this._settingsWindow();
+        if (!w) return;
+        w.delete(global.get_current_time());
+        let tries = 0;
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+            if (this.destroyed) return GLib.SOURCE_REMOVE;
+            if (this._settingsWindow() && ++tries < 30) return GLib.SOURCE_CONTINUE;
+            this.configureApplet(0);
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     // The settings window is a separate program that finds translations in ~/.local/share/locale.
@@ -254,6 +295,8 @@ class Win11WindowList extends Applet.Applet {
         const dest = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_data_dir()].concat(rel)));
         try {
             if (this.language !== 'pt-BR') {
+                const others = imports.ui.appletManager.getRunningInstancesForUuid(uuid);
+                if (others.some(a => a !== this && !a.destroyed && a.language === 'pt-BR')) return;
                 if (dest.query_exists(null)) dest.delete(null);
                 return;
             }
@@ -267,11 +310,17 @@ class Win11WindowList extends Applet.Applet {
 
     // Opens the settings window in the applet's own language, whatever the system language is.
     configureApplet(tab = 0) {
+        const open = this._settingsWindow();
+        if (open) {                                  // already open: bring it forward instead of a second one
+            Main.activateWindow(open, global.get_current_time());
+            return;
+        }
         this._syncLocale();
         try {
             const env = GLib.environ_setenv(GLib.get_environ(), 'LANGUAGE', this.language === 'pt-BR' ? 'pt_BR' : 'en', true);
-            GLib.spawn_async(null, ['xlet-settings', 'applet', this.metadata.uuid, '-i', String(this.instance_id), '-t', String(tab)],
+            const [ok, pid] = GLib.spawn_async(null, ['xlet-settings', 'applet', this.metadata.uuid, '-i', String(this.instance_id), '-t', String(tab)],
                 env, GLib.SpawnFlags.SEARCH_PATH, null);
+            this._settingsPid = ok ? pid : 0;
         } catch (e) {
             super.configureApplet(tab);
         }

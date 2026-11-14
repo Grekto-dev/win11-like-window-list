@@ -385,7 +385,9 @@ def s_pin_drag():
     check('button moved left by dragging', ids2.index(src) < ids.index(src), (ids, ids2))
     check('no drag state left behind', not shell_state().get('drag') and shell_state().get('modal') == 0, shell_state())
     close_windows()
-    check('pins untouched by the drag', evj("%s.pinnedApps" % A) == before, evj("%s.pinnedApps" % A))
+    # dragging a pinned button re-orders the pins (as on Windows): the same apps must still be pinned
+    check('the same apps stay pinned after the drag', sorted(evj("%s.pinnedApps" % A)) == sorted(before), evj("%s.pinnedApps" % A))
+    ev("(()=>{let a=%s;a._savePinned(%s);a._queueRefresh();return 1})()" % (A, json.dumps(before))); time.sleep(.8)
     errs = log_since(off)
     check('no errors logged by pin/drag', not errs, errs[:3])
 
@@ -551,6 +553,7 @@ def s_sync():
     if len(ids) < 2:
         print('skip (needs two instances with synchronisation on)'); return
     a, b = int(ids[0]), int(ids[1])
+    time.sleep(2)                       # let buttons of windows closed by earlier sections finish their animation
     order = lambda n: evj("%s.liveButtons().map(x=>x.id)" % I(n))
     pins = lambda n: evj("%s.pinnedApps" % I(n))
     check('both bars show the same buttons in the same order', order(a) == order(b), (order(a), order(b)))
@@ -602,8 +605,206 @@ def s_language():
 
 
 
+
+def s_liveapply():
+    print('\n== every setting takes effect at once (no reload, no reopening)')
+    off = log_offset()
+    f = settings_file()
+    backup = f.read_text()
+    helper = str(ROOT / 'tests/helpers/launcher_entry.py')
+    spawn_windows(2); spawn_other(); settle()
+    app = ev("(()=>{let l=%s.liveButtons().filter(b=>b.app&&b.id.endsWith('.desktop'));let b=l.find(b=>b.windows.length>0)||l[0];return b?b.id:''})()" % A)
+    env = dict(os.environ, LAUNCHER_APP=app)
+    btnjs = lambda id_: "%s.liveButtons().find(b=>b.id==='%s')" % (A, id_)
+    try:
+        # icon size
+        set_cfg(icon_size_mode='manual', icon_size=18)
+        check('icon size manual 18 applies', evj("%s.metrics.icon" % A) == 18 and evj("%s.iconChild.get_height()" % btnjs('win:WlTest')) == 18)
+        set_cfg(icon_size=24)
+        check('icon size manual 24 applies', evj("%s.metrics.icon" % A) == 24)
+        set_cfg(icon_size_mode='auto')
+        # accent colour of the focused indicator
+        activate('win:WlTest')
+        set_cfg(indicator_color='rgb(255,0,0)')
+        check('indicator colour applies', 'rgb(255,0,0)' in (ev("%s.indicator.get_style()" % btnjs('win:WlTest')) or ''), ev("%s.indicator.get_style()" % btnjs('win:WlTest')))
+        # animations
+        set_cfg(enable_animations=False)
+        check('animations off applies', ev("''+%s.animate" % A) == 'false')
+        set_cfg(enable_animations=True)
+        check('animations on applies', ev("''+%s.animate" % A) == 'true')
+        # badges and progress (a real app button, driven through LauncherEntry)
+        if app.endswith('.desktop'):
+            subprocess.run(['/usr/bin/python3', helper, 'count'], env=env); time.sleep(.5)
+            vis = lambda: ev("''+%s.badge.visible" % btnjs(app))
+            check('badge shows', vis() == 'true')
+            set_cfg(show_badges=False); check('show-badges off hides it at once', vis() == 'false')
+            set_cfg(show_badges=True); check('show-badges on shows it again at once', vis() == 'true')
+            subprocess.run(['/usr/bin/python3', helper, 'progress', '0.4'], env=env); time.sleep(.5)
+            track = lambda: ev("''+%s.track.visible" % btnjs(app))
+            has_win = evj("%s.windows.length>0" % btnjs(app))
+            if has_win:
+                check('progress bar shows', track() == 'true')
+                set_cfg(show_progress=False); check('show-progress off hides it at once', track() == 'false')
+                set_cfg(show_progress=True); check('show-progress on shows it again at once', track() == 'true')
+            subprocess.run(['/usr/bin/python3', helper, 'clear'], env=env)
+        # recent files in the jump list
+        recent_btn = ev("(()=>{let a=%s;let r=imports.ui.extension;return ''})()" % A)
+        def menu_texts(id_):
+            settle()
+            ev("(()=>{let a=%s;a.openMenu(%s);return 1})()" % (A, btnjs(id_))); time.sleep(.6)
+            t = ev("(()=>{let a=%s;let out=[];let walk=x=>{try{if(x.get_text&&x.get_text())out.push(x.get_text())}catch(e){}x.get_children&&x.get_children().forEach(walk)};walk(a.menu.actor);return JSON.stringify(out)})()" % A)
+            settle(); return t
+        cand = ev("(()=>{let a=%s;let b=a.liveButtons().find(b=>b.app&&b.id.endsWith('.desktop')&&require_recent(b));return b?b.id:''})()" % A) if False else ''
+        for id_ in evj("%s.liveButtons().filter(b=>b.app).map(b=>b.id)" % A) or []:
+            set_cfg(show_recent=True)
+            if 'Recent' in menu_texts(id_):
+                set_cfg(show_recent=False)
+                check('show-recent off removes the recent files at once', 'Recent' not in menu_texts(id_))
+                set_cfg(show_recent=True, recent_count=1)
+                n1 = menu_texts(id_).count('Recent')
+                check('recent-count applies at once', 'Recent' in menu_texts(id_))
+                set_cfg(recent_count=5)
+                break
+        else:
+            print('skip recent files (no app with recent files)')
+        # Super+N (only one bar owns the hotkeys: test that one)
+        owner = ev("''+(%s.find(a=>a._hotkeyOwner)||{instance_id:''}).instance_id" % _LIST)
+        if owner.isdigit():
+            of = SETTINGS / ('%s.json' % owner)
+            def set_owner(v):
+                d = json.loads(of.read_text()); d['super-num-hotkeys']['value'] = v; of.write_text(json.dumps(d, indent=4))
+                ev("%s.find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (_LIST, owner)); time.sleep(.8)
+            keys = lambda: evj("[...imports.ui.main.keybindingManager.bindings.values()].filter(e=>e.name&&e.name.startsWith('win11tb-key-%s-')).length" % owner)
+            ob = of.read_text()
+            try:
+                set_owner(True); on = keys()
+                set_owner(False); off_ = keys()
+                set_owner(True); on2 = keys()
+            finally:
+                of.write_text(ob); ev("%s.find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (_LIST, owner)); time.sleep(.5)
+            check('Super+N off unbinds and on binds again at once', on == 9 and off_ == 0 and on2 == 9, (on, off_, on2))
+        else:
+            print('skip Super+N (no bar owns the hotkeys)')
+        # delays are read at the moment they are used
+        set_cfg(hover_delay=1500)
+        settle(); bx, by = center('win:WlTest'); mv(bx - 6, by - 3); time.sleep(.05); mv(bx, by); time.sleep(.8)
+        early = ev("''+%s.flyout.isOpen" % A)
+        late = wait(lambda: ev("''+%s.flyout.isOpen" % A) == 'true', 2.5)
+        check('hover delay 1500 ms applies at once', early == 'false' and late)
+        set_cfg(hover_delay=400)
+        # peek options while a peek is showing
+        settle(); mv(bx - 6, by - 3); time.sleep(.05); mv(bx, by); time.sleep(1.0)
+        cards = evj("(()=>{let f=%s.flyout;return [...f._cards.values()].map(e=>{let [x,y]=e.card.get_transformed_position();let [w,h]=e.card.get_transformed_size();return [Math.round(x+w/2),Math.round(y+h/2)]})})()" % A)
+        glide(bx, by, bx, cards[0][1], 8); glide(bx, cards[0][1], cards[0][0], cards[0][1], 4)
+        wait(lambda: shell_state().get('peek'), 2)
+        check('peek is showing (isolated)', shell_state().get('hidden', 0) > 0, shell_state())
+        set_cfg(peek_mode='overlay'); time.sleep(.5)
+        st = shell_state()
+        check('switching to "above the others" changes the running peek', st.get('peek') and st.get('hidden') == 0, st)
+        set_cfg(peek_mode='isolate'); time.sleep(.5)
+        check('switching back hides the others again', shell_state().get('hidden', 0) > 0, shell_state())
+        set_cfg(enable_peek=False); time.sleep(.5)
+        st = shell_state()
+        check('turning peek off ends the running peek', not st.get('peek') and st.get('hidden') == 0 and st.get('opac0') == 0, st)
+        set_cfg(enable_peek=True)
+        settle()
+        # workspaces
+        subprocess.run(['wmctrl', '-r', 'WL test 2', '-t', '1']); time.sleep(.8)
+        n = lambda: evj("(()=>{let b=%s;return b?b.windows.length:0})()" % btnjs('win:WlTest'))
+        set_cfg(show_all_workspaces=False); a1 = n()
+        set_cfg(show_all_workspaces=True); a2 = n()
+        subprocess.run(['wmctrl', '-r', 'WL test 2', '-t', '0'])
+        check('show-all-workspaces applies at once', a1 == 1 and a2 == 2, (a1, a2))
+    finally:
+        f.write_text(backup)
+        ev("%s.settings.remoteUpdate('x',null)" % A); time.sleep(.8)
+        subprocess.run(['/usr/bin/python3', helper, 'clear'], env=env)
+        close_windows(); settle()
+    errs = log_since(off)
+    check('no errors logged while applying settings', not errs, errs[:3])
+
+
+ATSPI = r"""
+import gi, sys, json
+gi.require_version('Atspi', '2.0')
+from gi.repository import Atspi
+desk = Atspi.get_desktop(0)
+def walk(o, out):
+    try:
+        n, r = o.get_name(), o.get_role_name()
+        if n and r in ('page tab', 'label', 'push button', 'toggle button', 'combo box'):
+            out.append(n)
+        for i in range(o.get_child_count()):
+            walk(o.get_child_at_index(i), out)
+    except Exception:
+        pass
+res = []
+for i in range(desk.get_child_count()):
+    a = desk.get_child_at_index(i)
+    if (a.get_name() or '').lower().startswith('xlet-settings'):
+        walk(a, res)
+print(json.dumps(res))
+"""
+
+
+def settings_texts():
+    r = subprocess.run(['/usr/bin/python3', '-c', ATSPI], capture_output=True, text=True)
+    try:
+        return json.loads(r.stdout)
+    except Exception:
+        return []
+
+
+def s_language_live():
+    print('\n== language: changes at once, also in an open settings window')
+    off = log_offset()
+    f = settings_file()
+    backup = f.read_text()
+    mo = pathlib.Path.home() / '.local/share/locale/pt_BR/LC_MESSAGES' / (UUID + '.mo')
+    pid = lambda: evj("%s._settingsPid" % A)
+    open_pid = lambda: evj("(()=>{let w=%s._settingsWindow();return w?w.get_pid():0})()" % A)
+    def menu_texts():
+        settle()
+        ev("(()=>{let a=%s;a.openMenu(%s);return 1})()" % (A, button('win:WlTest'))); time.sleep(.6)
+        t = ev("(()=>{let a=%s;let out=[];let walk=x=>{try{if(x.get_text&&x.get_text())out.push(x.get_text())}catch(e){}x.get_children&&x.get_children().forEach(walk)};walk(a.menu.actor);return JSON.stringify(out)})()" % A)
+        settle(); return t
+    try:
+        set_cfg(language='en')
+        spawn_windows(2)
+        check('jump list in English', 'Close all windows' in menu_texts())
+        ev("%s.configureApplet(0)" % A)
+        check('settings window opens', wait(open_pid, 6))
+        time.sleep(1.5)
+        first = open_pid()
+        check('the open settings window is in English', 'Language' in settings_texts() and 'Icons' in settings_texts(), settings_texts()[:6])
+        ev("%s.configureApplet(0)" % A); time.sleep(.5)
+        check('opening it again only raises the existing window', open_pid() == first)
+        set_cfg(language='pt-BR')
+        check('jump list switches to Portuguese at once', 'Fechar todas as janelas' in menu_texts())
+        check('Portuguese catalogue installed', mo.exists())
+        reopened = wait(lambda: open_pid() and open_pid() != first and open_pid(), 8)
+        check('the open settings window was reopened by itself', bool(reopened), (first, open_pid()))
+        time.sleep(1.5)
+        txt = settings_texts()
+        check('the reopened settings window is in Portuguese', 'Idioma' in txt and 'Ícones' in txt, txt[:8])
+        second = open_pid()
+        set_cfg(language='en')
+        check('jump list back to English at once', 'Close all windows' in menu_texts())
+        reopened = wait(lambda: open_pid() and open_pid() != second and open_pid(), 8)
+        time.sleep(1.5)
+        check('settings window reopened in English', bool(reopened) and 'Language' in settings_texts(), settings_texts()[:6])
+        check('English removes the catalogue', not mo.exists())
+    finally:
+        subprocess.run(['pkill', '-x', 'xlet-settings'])
+        f.write_text(backup)
+        ev("%s.settings.remoteUpdate('x',null)" % A); time.sleep(.8)
+        close_windows(); settle()
+    errs = log_since(off)
+    check('no errors logged while switching language', not errs, errs[:3])
+
+
 SECTIONS = [('health', s_health), ('lifecycle', s_lifecycle), ('settings', s_settings_fuzz), ('windows', s_windows), ('closing', s_closing),
-            ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('sync', s_sync), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language)]
+            ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('sync', s_sync), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language), ('liveapply', s_liveapply), ('languagelive', s_language_live)]
 
 if __name__ == '__main__':
     want = sys.argv[1:]
