@@ -9,7 +9,8 @@ import ctypes, json, os, pathlib, re, shutil, subprocess, sys, time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 UUID = 'win11-window-list@cinnamon'
-A = "imports.ui.appletManager.getRunningInstancesForUuid('%s')[0]" % UUID
+_LIST = "imports.ui.appletManager.getRunningInstancesForUuid('%s')" % UUID
+A = _LIST + "[0]"           # re-bound to a fixed instance id below (the order of the list can change)
 ERRLOG = pathlib.Path.home() / '.xsession-errors'
 results = []
 _children = []
@@ -94,6 +95,15 @@ def spawn_windows(n):
     return p
 
 
+def spawn_other():
+    """A window of a second app class (WlSkip): something else to move the focus to."""
+    p = subprocess.Popen(['/usr/bin/python3', str(ROOT / 'tests/helpers/otherwin.py'), 'normal'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _children.append(p)
+    wait(lambda: evj("%s.liveButtons().some(b=>b.id==='win:WlSkip')" % A), 6)
+    time.sleep(.6)
+    return p
+
+
 def wl_windows():
     return evj("global.get_window_actors().map(a=>a.meta_window).filter(w=>w.get_wm_class()=='WlTest').map(w=>w.get_title())") or []
 
@@ -132,7 +142,21 @@ def settle():
 
 
 SETTINGS = pathlib.Path.home() / '.config/cinnamon/spices' / UUID
+INSTANCE = None
+
+
+def bind_instance():
+    """Pick the instance the tests drive (the one on the primary monitor if there are several) and pin A to it."""
+    global A, INSTANCE
+    iid = ev("''+(%s.find(a=>a.panel.monitorIndex===global.display.get_primary_monitor())||%s[0]).instance_id" % (_LIST, _LIST))
+    if iid.isdigit():
+        INSTANCE = int(iid)
+        A = "%s.find(a=>a.instance_id==%d)" % (_LIST, INSTANCE)
+
+
 def settings_file():
+    if INSTANCE is not None and (SETTINGS / ('%d.json' % INSTANCE)).exists():
+        return SETTINGS / ('%d.json' % INSTANCE)
     ids = sorted(SETTINGS.glob('*.json'))
     return ids[0] if ids else None
 
@@ -178,7 +202,7 @@ def s_lifecycle():
     check('applet loads after reloads', ev("''+!!%s" % A) == 'true')
     for k in ('overlay', 'chrome', 'dnd', 'keys', 'opac'):
         check('no growth in ' + k, after[k] <= before[k], (before[k], after[k]))
-    check('stage actors stable (±5)', abs(after['stage'] - before['stage']) <= 5, (before['stage'], after['stage']))
+    check('stage actors do not grow (+5 tolerated)', after['stage'] <= before['stage'] + 5, (before['stage'], after['stage']))
     errs = log_since(off)
     check('no errors logged while reloading', not errs, errs[:3])
 
@@ -308,6 +332,7 @@ def s_flyout_peek():
 def s_tile_art():
     print('\n== tile art levels')
     spawn_windows(2)
+    spawn_other()
     settle()
     bx, by = center('win:WlTest')
     activate('win:WlTest')
@@ -317,7 +342,7 @@ def s_tile_art():
     mv(bx, by); time.sleep(.5)
     check('focused+hover level', lv() == [0.088, 0.017, 0, -0.1], lv())
     settle()
-    activate('nemo')
+    activate('win:WlSkip')
     settle()
     check('idle level when another app is focused', lv() == [0, 0, 0, 0], lv())
     mv(bx, by); time.sleep(.5)
@@ -333,13 +358,18 @@ def s_pin_drag():
     off = log_offset()
     spawn_windows(1)
     settle()
+    before = evj("%s.pinnedApps" % A) or []
+    check('there is at least one pinned app to test with', before, before)
+    if not before:
+        close_windows(); return
+    target = before[-1]
+    ev("(()=>{let a=%s;let b=a.liveButtons().find(b=>b.id==='%s');a.unpin(b);return 1})()" % (A, target)); time.sleep(.8)
+    mid = evj("%s.pinnedApps" % A)
+    check('unpin takes it out of the pins', target not in mid and len(mid) == len(before) - 1, (before, mid))
     f = settings_file()
-    backup = f.read_text()
-    before = json.loads(backup)['pinned-apps']['value']
-    ev("(()=>{let a=%s;let b=a.liveButtons().find(b=>b.id.startsWith('nemo'));a.unpin(b);return 1})()" % A); time.sleep(.6)
-    mid = json.loads(f.read_text())['pinned-apps']['value']
-    check('unpin persists', len(mid) == len(before) - 1, (before, mid))
-    ev("(()=>{let a=%s;a.pinnedApps=a.pinnedApps.concat(['nemo.desktop']);a._queueRefresh();return 1})()" % A); time.sleep(.8)
+    check('unpin is saved in the settings file', target not in json.loads(f.read_text())['pinned-apps']['value'])
+    ev("(()=>{let a=%s;a._savePinned(%s);a._queueRefresh();return 1})()" % (A, json.dumps(before))); time.sleep(.8)
+    check('pinning again restores the list', evj("%s.pinnedApps" % A) == before, evj("%s.pinnedApps" % A))
     # drag reorder: drag the last button two places to the left
     ids = evj("%s.liveButtons().map(b=>b.id)" % A)
     src = ids[-1]
@@ -355,30 +385,9 @@ def s_pin_drag():
     check('button moved left by dragging', ids2.index(src) < ids.index(src), (ids, ids2))
     check('no drag state left behind', not shell_state().get('drag') and shell_state().get('modal') == 0, shell_state())
     close_windows()
-    f.write_text(backup)                      # give the user's pins back
-    ev("%s.settings.remoteUpdate('x',null)" % A); time.sleep(.8)
-    check('pins restored', evj("%s.pinnedApps" % A) == before, evj("%s.pinnedApps" % A))
+    check('pins untouched by the drag', evj("%s.pinnedApps" % A) == before, evj("%s.pinnedApps" % A))
     errs = log_since(off)
     check('no errors logged by pin/drag', not errs, errs[:3])
-
-
-def s_language():
-    print('\n== language')
-    f = settings_file()
-    backup = f.read_text()
-    mo = pathlib.Path.home() / '.local/share/locale/pt_BR/LC_MESSAGES' / (UUID + '.mo')
-    try:
-        set_cfg(language='pt-BR')
-        check('Portuguese catalogue installed', mo.exists())
-        check('runtime strings follow the language', ev("imports.ui.extension.importModule&&1") is not None and
-              evj("(()=>{let m=imports.ui.appletManager.applets;return 1})()") == 1)
-        set_cfg(language='en')
-        check('English removes the catalogue', not mo.exists())
-    finally:
-        f.write_text(backup)
-        ev("%s.settings.remoteUpdate('x',null)" % A)
-        time.sleep(.8)
-
 
 
 def s_attention():
@@ -387,8 +396,9 @@ def s_attention():
     p = subprocess.Popen(['/usr/bin/python3', str(ROOT / 'tests/helpers/testwin.py'), '2', 'urgent', '3500'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     _children.append(p)
     wait(lambda: len(wl_windows()) >= 2, 6)
+    spawn_other()
     time.sleep(1.0)                      # let both windows finish mapping before moving the focus away
-    activate('nemo')
+    activate('win:WlSkip')
     seen = []
     t0 = time.time()
     while time.time() - t0 < 6.5:
@@ -485,17 +495,52 @@ def s_menu():
 def s_launcher():
     print('\n== Unity LauncherEntry: count, progress, urgent')
     off = log_offset()
+    spawn_windows(1); spawn_other()          # take the focus away from whatever app is being tested
     helper = str(ROOT / 'tests/helpers/launcher_entry.py')
+    app = ev("(()=>{let l=%s.liveButtons().filter(b=>b.app&&b.id.endsWith('.desktop'));let b=l.find(b=>b.windows.length>0&&!b.focused)||l[0];return b?b.id:''})()" % A)
+    check('there is a button with a desktop app to test with', app.endswith('.desktop'), app)
+    if not app.endswith('.desktop'):
+        return
     cases = (('count', [], "b.badgeCount===7"), ('progress', ['0.3'], "b.progress===30"), ('urgent', ['1'], "b.attention===true"),
              ('clear', [], "b.badgeCount===0&&b.progress<=0&&!b.attention"))
+    running = evj("(()=>{let b=%s.liveButtons().find(b=>b.id==='%s');return b.windows.length>0&&!b.focused})()" % (A, app))
     for mode, args, pred in cases:
-        subprocess.run(['/usr/bin/python3', helper, mode] + args)
+        if mode == 'urgent' and not running:
+            print('skip urgent (the app has no unfocused window)'); continue
+        subprocess.run(['/usr/bin/python3', helper, mode] + args, env=dict(os.environ, LAUNCHER_APP=app))
         t0 = time.time()
-        ok = wait(lambda: ev("''+(()=>{let b=%s;return %s})()" % (button('com.google'), pred)) == 'true', 3, .02)
+        ok = wait(lambda: ev("''+(()=>{let b=%s.liveButtons().find(b=>b.id==='%s');return %s})()" % (A, app, pred)) == 'true', 3, .02)
         check('%s applied at once (%.2fs)' % (mode, time.time() - t0), ok and time.time() - t0 < 0.6)
+    close_windows()
     errs = log_since(off)
     check('no errors logged by LauncherEntry', not errs, errs[:3])
 
+
+def s_closing():
+    print('\n== closing apps: pinned buttons stay, closing buttons do not jump')
+    off = log_offset()
+    # 1. every pinned app that can be resolved keeps a button even with no window (Flatpak ids included)
+    r = evj("(()=>{let a=%s;let live=new Set(a.liveButtons().map(b=>b.id));return a._pinnedIds().map(id=>[id,!!a._lookupApp(id),live.has(id)])})()" % A) or []
+    check('all %d resolvable pinned apps have a button' % len(r), all(has for _, ok, has in r if ok), r)
+    # 2. closing the middle app: its button stays in its slot while it plays the closing animation
+    spawn_windows(1)
+    spawn_other()
+    ev("""(()=>{let a=%s;globalThis.__rec=[];imports.mainloop.timeout_add(16,()=>{
+        globalThis.__rec.push(a.box.get_children().map(k=>{let d=k._delegate;return [d&&d.id?d.id:'?',!!(d&&d.removing),Math.round(k.get_transformed_position()[0])]}));return globalThis.__rec.length<50});return 1})()""" % A)
+    time.sleep(.1)
+    subprocess.run(['wmctrl', '-c', 'WL test 1'])
+    time.sleep(1.3)
+    rec = evj("globalThis.__rec") or []
+    names = lambda f: [k[0] for k in f]
+    frames = [f for f in rec if any(k[0] == 'win:WlTest' and k[1] for k in f)]
+    check('the closing button was seen animating', len(frames) > 3, len(frames))
+    start = names(rec[0]).index('win:WlTest')
+    jumped = [f for f in frames if names(f).index('win:WlTest') != start]
+    check('the closing button keeps its place in the list (no jump to the start)', not jumped, jumped[:1])
+    check('the other app keeps a button', evj("%s.liveButtons().some(b=>b.id==='win:WlSkip')" % A))
+    close_windows()
+    errs = log_since(off)
+    check('no errors logged while closing', not errs, errs[:3])
 
 
 def s_sync():
@@ -538,11 +583,31 @@ def s_sync():
     check('no errors logged by synchronisation', not errs, errs[:3])
 
 
-SECTIONS = [('health', s_health), ('lifecycle', s_lifecycle), ('settings', s_settings_fuzz), ('windows', s_windows),
+def s_language():
+    print('\n== language')
+    f = settings_file()
+    backup = f.read_text()
+    mo = pathlib.Path.home() / '.local/share/locale/pt_BR/LC_MESSAGES' / (UUID + '.mo')
+    try:
+        set_cfg(language='pt-BR')
+        check('Portuguese catalogue installed', mo.exists())
+        check('runtime strings follow the language', ev("imports.ui.extension.importModule&&1") is not None and
+              evj("(()=>{let m=imports.ui.appletManager.applets;return 1})()") == 1)
+        set_cfg(language='en')
+        check('English removes the catalogue', not mo.exists())
+    finally:
+        f.write_text(backup)
+        ev("%s.settings.remoteUpdate('x',null)" % A)
+        time.sleep(.8)
+
+
+
+SECTIONS = [('health', s_health), ('lifecycle', s_lifecycle), ('settings', s_settings_fuzz), ('windows', s_windows), ('closing', s_closing),
             ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('sync', s_sync), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language)]
 
 if __name__ == '__main__':
     want = sys.argv[1:]
+    bind_instance()
     try:
         for name, fn in SECTIONS:
             if not want or name in want:

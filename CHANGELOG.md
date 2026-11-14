@@ -1,3 +1,9 @@
+## 1.0.2
+
+- **Fix: a pinned Flatpak app (e.g. Google Chrome) no longer disappears when its last window closes.** Cinnamon files Flatpak apps under an id with a suffix (`com.google.Chrome.desktop:flatpak`) that the plain lookup missed, so the pin was dropped as soon as the app stopped running.
+- **Fix: a closing button no longer jumps to the start of the list for an instant.** The re-ordering after a close moved every live button behind the one still playing its closing animation; now it keeps its slot until it disappears.
+- Tests: the live suite now drives one fixed bar when several exist, no longer depends on Chrome or Nemo windows being open, restores pins through the applet (they are shared between synchronised bars) and has a `closing` section.
+
 ## 1.0.1
 
 - **Monitors are synchronised by default.** Moving, pinning or unpinning buttons on one bar now changes every bar of the applet (other monitors) out of the box. Existing installs keep their saved choice; turn on *Synchronise monitors* in the settings.

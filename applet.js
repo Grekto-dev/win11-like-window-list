@@ -463,7 +463,10 @@ class Win11WindowList extends Applet.Applet {
         c(global.display, 'window-left-monitor', () => this._queueRefresh());
         c(global.window_manager, 'map', () => this._queueRefresh());
         c(global.workspace_manager, 'active-workspace-changed', () => this._queueRefresh());
-        c(this.appSystem, 'installed-changed', () => this._queueRefresh());
+        c(this.appSystem, 'installed-changed', () => {
+            this._appIndex = null;
+            this._queueRefresh();
+        });
         c(St.TextureCache.get_default(), 'icon-theme-changed', () => this._buttons.forEach(b => b.buildIcon()));
     }
 
@@ -567,6 +570,22 @@ class Win11WindowList extends Applet.Applet {
         return !!f && w !== f && w.is_ancestor_of_transient(f);
     }
 
+    // App for a (normalised) desktop id. Cinnamon files some apps under a suffixed id (Flatpak apps are
+    // "com.google.Chrome.desktop:flatpak"), which the plain lookup misses; without this a pinned
+    // Flatpak app vanished as soon as its last window closed.
+    _lookupApp(id) {
+        let app = this.appSystem.lookup_app(id);
+        if (app) return app;
+        if (!this._appIndex) {
+            this._appIndex = new Map();
+            this.appSystem.get_all().forEach(a => {
+                const key = normalizeId(a.get_id());
+                if (!this._appIndex.has(key)) this._appIndex.set(key, a);
+            });
+        }
+        return this._appIndex.get(id) || null;
+    }
+
     // Returns {id, app} for a window; windows without a launcher group by WM class.
     _identify(w) {
         let app = this.tracker.get_window_app(w);
@@ -638,7 +657,7 @@ class Win11WindowList extends Applet.Applet {
         const apps = new Map();
         pinned.forEach(id => {
             const g = groups.get(id);
-            const app = (g && g.app) || this.appSystem.lookup_app(id);
+            const app = (g && g.app) || this._lookupApp(id);
             if (app) apps.set(id, app);
         });
         groups.forEach((g, id) => {
@@ -684,12 +703,26 @@ class Win11WindowList extends Applet.Applet {
         this.flyout.sync();
     }
 
-    // Puts the live buttons in `list` order at the end of the box (collapsing ones stay in front).
+    // Puts the live buttons in `list` order. Only the slots they already occupy are reassigned, so a button
+    // that is playing its closing animation (or a drop placeholder) stays exactly where it is instead of
+    // jumping to the start of the list.
     _restack(list) {
         const kids = this.box.get_children();
-        const same = list.length > 0 && list.every((b, i) => kids[kids.length - list.length + i] === b.actor);
-        if (same) return;
-        list.forEach(b => this.box.set_child_above_sibling(b.actor, null));
+        const isLive = a => a._delegate instanceof TaskButton && !a._delegate.removing;
+        const slots = [];
+        kids.forEach((a, i) => {
+            if (isLive(a)) slots.push(i);
+        });
+        if (slots.length !== list.length) {
+            list.forEach(b => this.box.set_child_above_sibling(b.actor, null));
+            return;
+        }
+        if (slots.every((pos, k) => kids[pos] === list[k].actor)) return;
+        const target = kids.slice();
+        slots.forEach((pos, k) => {
+            target[pos] = list[k].actor;
+        });
+        target.forEach((a, i) => this.box.set_child_at_index(a, i));
     }
 
     _applyStates() {
@@ -1231,7 +1264,7 @@ class Win11WindowList extends Applet.Applet {
     handleDragOver(source, actor, x, y, time) {
         const id = this._foreignAppId(source);
         if (!id) return DND.DragMotionResult.CONTINUE;
-        if (this._pinnedIds().includes(id) || !this.appSystem.lookup_app(id)) return DND.DragMotionResult.CONTINUE;
+        if (this._pinnedIds().includes(id) || !this._lookupApp(id)) return DND.DragMotionResult.CONTINUE;
 
         const existing = this._buttons.get(id);
         if (existing) return DND.DragMotionResult.COPY_DROP;      // running, not pinned: pinning keeps its place
@@ -1260,7 +1293,7 @@ class Win11WindowList extends Applet.Applet {
 
     acceptDrop(source, actor, x, y, time) {
         const id = this._foreignAppId(source);
-        if (!id || !this.appSystem.lookup_app(id)) return false;
+        if (!id || !this._lookupApp(id)) return false;
         const pinned = this._pinnedIds();
         if (pinned.includes(id)) return false;
 
