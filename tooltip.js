@@ -23,10 +23,10 @@ class TaskTip {
         actor.set_position(x, y);
         actor.ease({
             opacity: 255,
-            duration: this.applet.animate ? 100 : 0,
+            duration: this.applet.animCards ? 100 : 0,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
-        if (!this.applet.animate) actor.opacity = 255;
+        if (!this.applet.animCards) actor.opacity = 255;
         this.actor = actor;
     }
 
@@ -39,7 +39,7 @@ class TaskTip {
             Main.layoutManager.removeChrome(actor);
             actor.destroy();
         };
-        if (immediate || !this.applet.animate) {
+        if (immediate || !this.applet.animCards) {
             done();
         } else {
             actor.ease({

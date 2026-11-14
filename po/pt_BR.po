@@ -36,8 +36,14 @@ msgstr "Janelas"
 msgid "Several monitors"
 msgstr "Vários monitores"
 
-msgid "Thumbnails"
-msgstr "Miniaturas"
+msgid "Hover cards"
+msgstr "Cartões ao passar o mouse"
+
+msgid "Peek"
+msgstr "Espiar"
+
+msgid "Dragging a file over a button"
+msgstr "Arrastando um arquivo sobre um botão"
 
 msgid "Animations"
 msgstr "Animações"
@@ -84,8 +90,26 @@ msgstr "Tamanho manual dos ícones (no máximo o tamanho da barra)"
 msgid "Accent colour of the focused-window indicator"
 msgstr "Cor de destaque do indicador da janela em foco"
 
-msgid "Delay before the thumbnail flyout opens"
-msgstr "Atraso até abrir a miniatura"
+msgid "Delay before the cards open"
+msgstr "Atraso até abrir os cartões"
+
+msgid "Show the window cards when hovering a button"
+msgstr "Mostrar os cartões das janelas ao passar o mouse sobre um botão"
+
+msgid "When off, hovering a button only shows the app name; click a button with several windows to see its cards."
+msgstr "Desligado, passar o mouse mostra só o nome do app; clique em um botão com várias janelas para ver os cartões."
+
+msgid "Show a thumbnail of each window in the cards"
+msgstr "Mostrar uma miniatura de cada janela nos cartões"
+
+msgid "When off, the cards are compact rows with the app icon and the window title."
+msgstr "Desligado, os cartões são linhas compactas com o ícone do app e o título da janela."
+
+msgid "Show the app name in a tooltip when hovering a button without cards"
+msgstr "Mostrar o nome do app em uma dica ao passar o mouse sobre um botão sem cartões"
+
+msgid "Bring a window forward when a dragged file is held over its button"
+msgstr "Trazer uma janela para a frente ao segurar um arquivo arrastado sobre o botão dela"
 
 msgid "Peek at a window while hovering its thumbnail"
 msgstr "Espiar a janela ao passar o mouse na miniatura"
@@ -95,6 +119,27 @@ msgstr "Atraso até espiar"
 
 msgid "Animate buttons, indicators and flyouts"
 msgstr "Animar botões, indicadores e miniaturas"
+
+msgid "Fade button highlights and indicators"
+msgstr "Suavizar os realces e os indicadores dos botões"
+
+msgid "Animate buttons opening, closing and moving"
+msgstr "Animar botões ao abrir, fechar e mover"
+
+msgid "Animate the cards, tooltips and the jump list"
+msgstr "Animar os cartões, as dicas e a lista de atalhos"
+
+msgid "Pulse buttons that ask for attention"
+msgstr "Pulsar os botões que pedem atenção"
+
+msgid "When off, they stay lit instead of pulsing."
+msgstr "Desligado, eles ficam acesos em vez de pulsar."
+
+msgid "Accept counts, progress and alerts that apps send to the launcher"
+msgstr "Aceitar contagens, progresso e alertas que os apps enviam ao lançador"
+
+msgid "Used by Chrome downloads, file managers and others. Window progress and system notification counts do not depend on it."
+msgstr "Usado por downloads do Chrome, gerenciadores de arquivos e outros. O progresso das janelas e a contagem de notificações do sistema não dependem dele."
 
 msgid "Bounce the icon while an app is launching"
 msgstr "Pular o ícone enquanto um app abre"

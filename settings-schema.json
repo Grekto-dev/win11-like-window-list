@@ -15,7 +15,7 @@
         "flyout": {
             "type": "page",
             "title": "Hover and animations",
-            "sections": ["flyout-hover", "flyout-anim"]
+            "sections": ["flyout-hover", "flyout-peek", "flyout-drag", "flyout-anim"]
         },
         "extras": {
             "type": "page",
@@ -44,13 +44,23 @@
         },
         "flyout-hover": {
             "type": "section",
-            "title": "Thumbnails",
-            "keys": ["hover-delay", "xdnd-delay", "enable-peek", "peek-mode", "peek-delay"]
+            "title": "Hover cards",
+            "keys": ["hover-cards", "hover-delay", "show-previews", "show-tooltips"]
+        },
+        "flyout-peek": {
+            "type": "section",
+            "title": "Peek",
+            "keys": ["enable-peek", "peek-mode", "peek-delay"]
+        },
+        "flyout-drag": {
+            "type": "section",
+            "title": "Dragging a file over a button",
+            "keys": ["xdnd-hover", "xdnd-delay"]
         },
         "flyout-anim": {
             "type": "section",
             "title": "Animations",
-            "keys": ["enable-animations", "launch-animation"]
+            "keys": ["enable-animations", "animate-highlight", "animate-buttons", "animate-cards", "pulse-attention", "launch-animation"]
         },
         "extras-jump": {
             "type": "section",
@@ -60,7 +70,7 @@
         "extras-badges": {
             "type": "section",
             "title": "Button decorations",
-            "keys": ["show-badges", "show-progress"]
+            "keys": ["show-badges", "show-progress", "launcher-api"]
         }
     },
     "pinned-apps": {
@@ -127,6 +137,12 @@
         "default": "rgb(76,194,255)",
         "description": "Accent colour of the focused-window indicator"
     },
+    "hover-cards": {
+        "type": "switch",
+        "default": true,
+        "description": "Show the window cards when hovering a button",
+        "tooltip": "When off, hovering a button only shows the app name; click a button with several windows to see its cards."
+    },
     "hover-delay": {
         "type": "spinbutton",
         "default": 400,
@@ -134,7 +150,24 @@
         "max": 2000,
         "step": 50,
         "units": "ms",
-        "description": "Delay before the thumbnail flyout opens"
+        "description": "Delay before the cards open",
+        "dependency": "hover-cards"
+    },
+    "show-previews": {
+        "type": "switch",
+        "default": true,
+        "description": "Show a thumbnail of each window in the cards",
+        "tooltip": "When off, the cards are compact rows with the app icon and the window title."
+    },
+    "show-tooltips": {
+        "type": "switch",
+        "default": true,
+        "description": "Show the app name in a tooltip when hovering a button without cards"
+    },
+    "xdnd-hover": {
+        "type": "switch",
+        "default": true,
+        "description": "Bring a window forward when a dragged file is held over its button"
     },
     "xdnd-delay": {
         "type": "spinbutton",
@@ -143,7 +176,8 @@
         "max": 2000,
         "step": 50,
         "units": "ms",
-        "description": "Delay before bringing a window forward while dragging an item over it"
+        "description": "Delay before bringing a window forward while dragging an item over it",
+        "dependency": "xdnd-hover"
     },
     "enable-peek": {
         "type": "switch",
@@ -176,10 +210,36 @@
         "default": true,
         "description": "Animate buttons, indicators and flyouts"
     },
+    "animate-highlight": {
+        "type": "switch",
+        "default": true,
+        "description": "Fade button highlights and indicators",
+        "dependency": "enable-animations"
+    },
+    "animate-buttons": {
+        "type": "switch",
+        "default": true,
+        "description": "Animate buttons opening, closing and moving",
+        "dependency": "enable-animations"
+    },
+    "animate-cards": {
+        "type": "switch",
+        "default": true,
+        "description": "Animate the cards, tooltips and the jump list",
+        "dependency": "enable-animations"
+    },
+    "pulse-attention": {
+        "type": "switch",
+        "default": true,
+        "description": "Pulse buttons that ask for attention",
+        "tooltip": "When off, they stay lit instead of pulsing.",
+        "dependency": "enable-animations"
+    },
     "launch-animation": {
         "type": "switch",
         "default": true,
-        "description": "Bounce the icon while an app is launching"
+        "description": "Bounce the icon while an app is launching",
+        "dependency": "enable-animations"
     },
     "show-recent": {
         "type": "switch",
@@ -199,6 +259,12 @@
         "type": "switch",
         "default": true,
         "description": "Show the notification count on the button"
+    },
+    "launcher-api": {
+        "type": "switch",
+        "default": true,
+        "description": "Accept counts, progress and alerts that apps send to the launcher",
+        "tooltip": "Used by Chrome downloads, file managers and others. Window progress and system notification counts do not depend on it."
     },
     "show-progress": {
         "type": "switch",

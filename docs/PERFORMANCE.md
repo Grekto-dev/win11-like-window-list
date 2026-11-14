@@ -61,6 +61,37 @@ only differences are four pixels at the rounded ends of the running indicator.
 * **The thumbnail flyout is lighter and is not rebuilt for nothing.** A card has four St widgets
   instead of eight, and a refresh with the same windows keeps the cards (and a running peek).
 
+## Options that turn work off (1.1.0)
+
+Everything above is always on. On top of it, each optional feature has a switch (all on by default,
+all applied at once). They exist for machines where even a few milliseconds per event or a
+compositor busy with live thumbnails matters.
+
+| Switch | What it stops doing |
+|---|---|
+| Show the window cards when hovering a button | opening the thumbnail card strip on hover (a click still opens it) |
+| Show a thumbnail of each window in the cards | creating a live clone of every window; cards become rows |
+| Show the app name in a tooltip | the tooltip over buttons without windows |
+| Peek | hiding other windows / drawing a clone when the pointer is on a card |
+| Bring a window forward when a dragged file is held over its button | listening to drags from other programs |
+| Accept counts, progress and alerts that apps send to the launcher | listening to the Unity LauncherEntry D-Bus signal |
+| Notification counts, progress bars, recent files | polling counts, drawing bars, reading the recent-files list |
+| Four animation switches under the master one | tile and indicator fades; buttons opening / closing / moving; cards, tooltips and the jump list; the attention pulse |
+
+Measured with `tests/helpers/profile.py --lite` against the defaults (20 windows, i5-11400; both bars
+switched, three runs each, averages):
+
+| scenario | applet JS, defaults | applet JS, options off | shell CPU, defaults → off |
+|---|---|---|---|
+| an app sending 50 launcher updates / s for 8 s | 250 ms | 0 ms | 29 % → 23 % |
+| the pointer visits every button three times | 263 ms | 22 ms | 45 % → 43 % |
+| 80 focus changes | 135 ms | 140 ms | 43 % → 43 % |
+
+Focus changes cost the same because the cheap parts of the applet (previous section) are always on;
+the switches matter when something keeps sending signals or the pointer keeps opening cards. The
+shell's own CPU is a noisy figure (±2 points between runs of the same setup), so read the second
+column first.
+
 ## Not done
 
 * The jump list and the tooltip are still St menus; they are built when opened, not kept around.

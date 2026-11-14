@@ -181,7 +181,7 @@ class TaskButton {
         if (this._pressed === true) name = 'pressed';
         else if (this.focused) name = this.hover || this._forced ? 'focusHover' : 'focused';
         else if (this.hover || this._forced) name = 'hover';
-        this.art.setState(name, animate && this.applet.animate);
+        this.art.setState(name, animate && this.applet.animHighlight);
     }
 
     // -------------------------------------------------------------------- icon
@@ -235,8 +235,8 @@ class TaskButton {
             this._applyMulti();
             this._applyProgress();
         }
-        this._applyIndicator(this.applet.animate);
-        this.art.setFlash(attention, this.applet.animate);
+        this._applyIndicator(this.applet.animHighlight);
+        this.art.setFlash(attention, this.applet.animPulse);
     }
 
     // Running indicator: 6 px grey when idle, 16 px accent when focused, pink when asking for attention.
@@ -310,7 +310,7 @@ class TaskButton {
         this.iconBin.ease({
             scale_x: target,
             scale_y: target,
-            duration: this.applet.animate ? 100 : 0,
+            duration: this.applet.animButtons ? 100 : 0,
             mode: EASE_OUT,
         });
     }
@@ -360,7 +360,7 @@ class TaskButton {
         const cur = this.actor[prop] || 0;
         this.actor.remove_transition(prop.replace('_', '-'));
         this.actor[prop] = cur + delta;
-        if (!this.applet.animate) {
+        if (!this.applet.animButtons) {
             this.actor[prop] = 0;
             return;
         }
@@ -373,7 +373,7 @@ class TaskButton {
 
     // New button: the group recentres first, then the icon rises into place (see REFERENCE.md).
     animateIn() {
-        if (!this.applet.animate) return;
+        if (!this.applet.animButtons) return;
         const m = this.applet.metrics;
         const H = m.horizontal;
         this.actor.set_clip_to_allocation(true);
@@ -403,7 +403,7 @@ class TaskButton {
             if (!this.destroyed) this.actor.destroy();
             this.destroyed = true;
         };
-        if (animated && this.applet.animate) {
+        if (animated && this.applet.animButtons) {
             const m = this.applet.metrics;
             const H = m.horizontal;
             this.removing = true;

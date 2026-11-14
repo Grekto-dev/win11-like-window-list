@@ -119,7 +119,7 @@ class ReorderDrag {
         this.ghost.ease({
             scale_x: DRAG_SCALE,
             scale_y: DRAG_SCALE,
-            duration: a.animate ? 100 : 0,
+            duration: a.animButtons ? 100 : 0,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
         this._move(x, y);
@@ -162,7 +162,7 @@ class ReorderDrag {
         this._release();
         if (this.finished) return;
         a.commitOrder();
-        if (btn.destroyed || !this.ghost || !a.animate) {
+        if (btn.destroyed || !this.ghost || !a.animButtons) {
             this._finish();
             return;
         }

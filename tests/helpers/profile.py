@@ -111,13 +111,27 @@ def s_hover():
 
 
 SC = {'idle': s_idle, 'churn': s_churn, 'focus': s_focus, 'title': s_title, 'hover': s_hover}
+LITE = {'hover-cards': False, 'show-previews': False, 'show-tooltips': False, 'xdnd-hover': False, 'launcher-api': False,
+        'animate-highlight': False, 'animate-buttons': False, 'animate-cards': False, 'pulse-attention': False,
+        'enable-peek': False, 'show-badges': False, 'show-progress': False, 'show-recent': False}
+
 if __name__ == '__main__':
     L.bind_instance()
-    want = sys.argv[1:] or list(SC)
+    args = sys.argv[1:]
+    lite = '--lite' in args          # run with every optional feature that costs something turned off
+    want = [a for a in args if not a.startswith('--')] or list(SC)
+    saved = {n: (L.SETTINGS / ('%s.json' % n)).read_text() for n in [f.stem for f in L.SETTINGS.glob('*.json')]}
+    if lite:
+        L.set_cfg_all(**{k.replace('-', '_'): v for k, v in LITE.items()})
+        print('options off:', ', '.join(LITE))
     print(L.ev(PROBE))
     try:
         for n in want:
             run(n, SC[n])
     finally:
         L.close_windows()
+        for n, txt in saved.items():
+            (L.SETTINGS / ('%s.json' % n)).write_text(txt)
+        for n in saved:
+            L.ev("imports.ui.appletManager.getRunningInstancesForUuid('%s').find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (L.UUID, n))
         print('\nSUMMARY ' + json.dumps({k: [v['c'], round(v['us'] / 1000, 1)] for k, v in RESULTS.items()}))

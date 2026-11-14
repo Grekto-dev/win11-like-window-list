@@ -75,7 +75,7 @@ function revealFromPanel(applet, actor, duration, mode, onDone) {
         Main.layoutManager._chrome.updateRegions();
         if (onDone) onDone();
     };
-    if (!applet.animate || duration <= 0 || !applet.panel) {
+    if (!applet.animCards || duration <= 0 || !applet.panel) {
         finish();
         return;
     }

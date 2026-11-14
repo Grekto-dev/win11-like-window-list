@@ -218,7 +218,7 @@ class ContextMenu {
             Main.layoutManager.removeChrome(actor);
             actor.destroy();
         };
-        if (immediate || !this.applet.animate) {
+        if (immediate || !this.applet.animCards) {
             done();
         } else {
             actor.set_reactive(false);

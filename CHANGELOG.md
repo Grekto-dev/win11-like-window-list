@@ -1,3 +1,41 @@
+## 1.1.0
+
+New settings to turn off the parts of the applet that cost the most, for slow machines. Every one is
+**on by default** (nothing changes unless you switch it off) and applies at once, with no reload.
+
+*Hover and cards*
+- **Show the window cards when hovering a button**: off → hovering shows only the app name; a click on a
+  button with several windows still opens the cards. Turning it off closes cards opened by hover.
+- **Show a thumbnail of each window in the cards**: off → compact rows (icon and title), no live
+  thumbnails. Applies to cards that are open.
+- **Show the app name in a tooltip** when hovering a button without cards.
+
+*Peek, dragging, launcher*
+- **Bring a window forward when a dragged file is held over its button**: off → the applet stops
+  listening to drags from other programs.
+- **Accept counts, progress and alerts that apps send to the launcher**: off → the applet stops
+  listening to that D-Bus signal (some apps, such as browsers, send it many times a second during a
+  download). Window progress and system notification counts are not affected.
+- The existing peek, badges, progress bars and recent files switches stay as they were.
+
+*Animations* (the master switch stays; four finer ones sit under it)
+- **Fade button highlights and indicators**
+- **Animate buttons opening, closing and moving**
+- **Animate the cards, tooltips and the jump list**
+- **Pulse buttons that ask for attention**: off → they stay lit.
+
+The settings page *Hover and animations* is now split into *Hover cards*, *Peek*, *Dragging a file over
+a button* and *Animations* (with the Portuguese translation of every new text).
+
+Measured on the test machine with 20 windows (`tests/helpers/profile.py --lite`): an app sending 50
+progress updates a second cost 250 ms of applet time per 8 s and the shell 29 % of a core; with the
+launcher option off, 0 ms and 23 %. Visiting every button three times cost 263 ms of applet time (shell
+45 %); with the cards, tooltips and peek off, 22 ms (shell 43 %). Focus changes cost the same either way
+(the applet is already cheap there). See `docs/PERFORMANCE.md`.
+
+Tests: `lite` section (each option proved at once through the settings file, and the whole applet still
+working with everything off), `tests/helpers/profile.py --lite`.
+
 ## 1.0.5
 
 Performance release: same features and the same look, a fraction of the work. See `docs/PERFORMANCE.md`

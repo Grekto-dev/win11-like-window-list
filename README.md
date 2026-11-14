@@ -18,6 +18,7 @@ Internal identifier: `win11-window-list@cinnamon`. Geometry, colours and behavio
 - **Several monitors**: *Synchronise monitors* (on by default) makes every bar of the applet show the same windows, order and pinned apps: moving, pinning or unpinning on one monitor changes the others.
 - **Progress and badges**: a progress bar (windows' `_NET_WM_PROGRESS`, XApp progress and the Unity LauncherEntry protocol) replaces the indicator; the notification count and LauncherEntry counts show as a badge; LauncherEntry `urgent` flashes the button.
 - **Recent files** in the jump list (follows the system privacy setting).
+- **Options that do less work**: every optional piece can be switched off in the settings, all on by default and all applied at once: the cards on hover, the thumbnails in the cards (compact rows instead), the name tooltip, the peek, the file-drag hover, the launcher API (counts and progress sent by apps), the badges and progress bars, the recent files, and each kind of animation on its own (highlight fades, buttons opening and closing, cards and tooltips, the attention pulse) besides the master switch.
 - **Click behaviour**: not running → launch (icon hops); one window → focus, or minimise if it already has focus; several windows → opens the thumbnail flyout, which stays open until you click elsewhere or press Esc. Middle click or Shift + click opens a new window.
 - **Thumbnail flyout**: opens after 0.4 s of hover, follows the pointer from button to button, shows live previews with title and close button, peeks at the window under the pointer, middle click on a card closes that window. Falls back to a compact list when the cards do not fit the screen.
 - **Jump list** (right click): the app's desktop actions under *Tasks*, the app itself, pin/unpin and close window(s); arrow keys, Enter and Esc work.
@@ -55,7 +56,7 @@ The applet is built to cost next to nothing when idle and a few milliseconds per
 ```bash
 python3 tests/static_check.py          # syntax, settings schema, translations (no Cinnamon needed)
 python3 tests/live_suite.py            # ~100 checks against a running Cinnamon session (see below)
-python3 tests/live_suite.py flyout art # only some sections: health lifecycle settings windows closing flyout art pin sync attention menu launcher xdnd language liveapply languagelive languageall progress
+python3 tests/live_suite.py flyout art # only some sections: health lifecycle settings windows closing flyout art pin sync attention menu launcher xdnd language liveapply languagelive languageall progress lite
 ```
 
 The live suite drives the real shell (D-Bus `org.Cinnamon.Eval`, XTEST pointer and keys, small GTK test windows and, for the drag test, Nemo). It restores the applet settings and your pinned apps, but run it on a session you are not working in: it moves the pointer, opens windows and reloads the applet. Reloads are also checked for leaks.

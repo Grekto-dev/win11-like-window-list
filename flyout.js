@@ -103,6 +103,13 @@ class Flyout {
         this._cards.clear();
     }
 
+    // The cards must be rebuilt now (a setting that changes how they look was changed).
+    rebuildNow() {
+        if (!this.isOpen || !this.button || this.button.destroyed || this.button.windows.length === 0) return;
+        this._rebuild();
+        this._reposition();
+    }
+
     // Are the cards on screen exactly the windows of this button, in order?
     _showsWindowsOf(button) {
         const ws = button.windows;
@@ -148,7 +155,7 @@ class Flyout {
             Main.layoutManager.removeChrome(actor);
             actor.destroy();
         };
-        if (immediate || !this.applet.animate) {
+        if (immediate || !this.applet.animCards) {
             done();
         } else {
             actor.set_reactive(false);
@@ -169,7 +176,7 @@ class Flyout {
         const mon = monitorRect(btn.actor);
         const perRow = Math.max(1, Math.floor((mon.width - 2 * m.px(8)) / m.px(CARD_W)));
         const wasList = this.listMode;
-        this.listMode = windows.length > perRow;
+        this.listMode = windows.length > perRow || !this.applet.showPreviews;
 
         this._endPeek();
         this._clearCards();
@@ -388,7 +395,7 @@ class Flyout {
     }
 
     _fadeMs() {
-        return this.applet.animate ? 120 : 0;
+        return this.applet.animCards ? 120 : 0;
     }
 
     _hideActor(a) {
@@ -440,7 +447,7 @@ class Flyout {
         // 'isolate': every other window fades out and only this one is shown, in place.
         // 'overlay': nothing else changes; the window is shown above whatever is on screen.
         this._peekIsolated = this.applet.peekMode !== 'overlay';
-        const ms = this._peekIsolated ? this._fadeMs() : (this.applet.animate ? 200 : 0);
+        const ms = this._peekIsolated ? this._fadeMs() : (this.applet.animCards ? 200 : 0);
         if (ms) clone.ease({ opacity: 255, duration: ms, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
         else clone.opacity = 255;
         if (this._peekIsolated) this._hideOthers(w);
@@ -465,7 +472,7 @@ class Flyout {
         }
         this._peekWindow = w;
         this._peekClone = clone;
-        const ms = this.applet.animate ? 130 : 0;
+        const ms = this.applet.animCards ? 130 : 0;
         clone.ease({ opacity: 255, duration: ms, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
         if (old) {
             old.ease({
@@ -494,7 +501,7 @@ class Flyout {
         this._peekWindow = null;
         this._peeking = false;
         this._restoreOthers();
-        const ms = !this._peekIsolated && this.applet.animate ? 120 : 0;
+        const ms = !this._peekIsolated && this.applet.animCards ? 120 : 0;
         Array.from(this._clones).forEach(c => {
             if (!ms) {
                 this._dropClone(c);

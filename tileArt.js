@@ -250,8 +250,9 @@ class TileArt {
     // Attention flash: the orange overlay rises once, then breathes between 110/255 and full strength
     // (≈ 2 s period, see REFERENCE.md). Without animation it simply stays lit.
     setFlash(on, animate) {
-        if (on === this._flashing) return;
+        if (on === this._flashing && (!on || animate === this._flashAnimate)) return;
         this._flashing = on;
+        this._flashAnimate = animate;
         if (this._flashTl) {
             this._flashTl.stop();
             this._flashTl = null;

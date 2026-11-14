@@ -36,9 +36,9 @@ class Placeholder {
         const m = applet.metrics;
         this.actor.set_size(m.horizontal ? 0 : m.tileW, m.horizontal ? m.tileH : 0);
         this.actor.ease(m.horizontal
-            ? { width: m.tileW, duration: applet.animate ? 150 : 0, mode: Clutter.AnimationMode.EASE_OUT_CUBIC }
-            : { height: m.tileH, duration: applet.animate ? 150 : 0, mode: Clutter.AnimationMode.EASE_OUT_CUBIC });
-        if (!applet.animate) this.actor.set_size(m.tileW, m.tileH);
+            ? { width: m.tileW, duration: applet.animButtons ? 150 : 0, mode: Clutter.AnimationMode.EASE_OUT_CUBIC }
+            : { height: m.tileH, duration: applet.animButtons ? 150 : 0, mode: Clutter.AnimationMode.EASE_OUT_CUBIC });
+        if (!applet.animButtons) this.actor.set_size(m.tileW, m.tileH);
     }
 
     slideFrom(delta) {
@@ -51,7 +51,7 @@ class Placeholder {
             this.destroyed = true;
             this.actor.destroy();
         };
-        if (animated && this.applet.animate) {
+        if (animated && this.applet.animButtons) {
             const m = this.applet.metrics;
             this.actor.set_reactive(false);
             this.actor.ease(Object.assign(m.horizontal ? { width: 0 } : { height: 0 },
@@ -159,14 +159,34 @@ class Win11WindowList extends Applet.Applet {
             this.stateEpoch++;
             this._queueStates();
         });
+        s.bindProperty(IN, 'hover-cards', 'hoverCards', () => {
+            if (this.hoverCards) return;
+            this._flyoutTimer.clear();
+            if (this.flyout.isOpen && !this.flyout.sticky) this.flyout.close(true);
+        });
         s.bindProperty(IN, 'hover-delay', 'hoverDelay', null);
+        s.bindProperty(IN, 'show-previews', 'showPreviews', () => this.flyout && this.flyout.rebuildNow());
+        s.bindProperty(IN, 'show-tooltips', 'showTooltips', () => {
+            if (this.showTooltips) return;
+            this._tipTimer.clear();
+            this.tip.hide(true);
+        });
+        s.bindProperty(IN, 'xdnd-hover', 'xdndHover', () => this._applyXdnd());
         s.bindProperty(IN, 'xdnd-delay', 'xdndDelay', null);
+        s.bindProperty(IN, 'launcher-api', 'launcherApi', () => this._applyLauncher());
         s.bindProperty(IN, 'enable-peek', 'enablePeek', () => {
             if (!this.enablePeek && this.flyout) this.flyout.endPeekNow();
         });
         s.bindProperty(IN, 'peek-mode', 'peekMode', () => this.flyout && this.flyout.restartPeek());
         s.bindProperty(IN, 'peek-delay', 'peekDelay', null);
         s.bindProperty(IN, 'enable-animations', 'enableAnimations', null);
+        s.bindProperty(IN, 'animate-highlight', 'animateHighlight', null);
+        s.bindProperty(IN, 'animate-buttons', 'animateButtons', null);
+        s.bindProperty(IN, 'animate-cards', 'animateCards', null);
+        s.bindProperty(IN, 'pulse-attention', 'pulseAttention', () => {
+            this.stateEpoch++;                 // buttons already flashing switch style now
+            this._queueStates();
+        });
         s.bindProperty(IN, 'launch-animation', 'launchAnimation', null);
         s.bindProperty(IN, 'show-badges', 'showBadges', () => {
             this._syncBadgeTimer();
@@ -180,8 +200,25 @@ class Win11WindowList extends Applet.Applet {
         s.bindProperty(IN, 'recent-count', 'recentCount', null);
     }
 
+    // One master switch and four finer ones: each kind of motion can be turned off on its own.
     get animate() {
         return this.enableAnimations;
+    }
+
+    get animHighlight() {            // tile highlight fades, indicator growing / fading
+        return this.enableAnimations && this.animateHighlight;
+    }
+
+    get animButtons() {              // buttons opening, closing, moving; icon press; drag drop
+        return this.enableAnimations && this.animateButtons;
+    }
+
+    get animCards() {                // thumbnail cards, peek, tooltips, jump list
+        return this.enableAnimations && this.animateCards;
+    }
+
+    get animPulse() {                // attention flash breathing
+        return this.enableAnimations && this.pulseAttention;
     }
 
     _horizontal() {
@@ -374,8 +411,8 @@ class Win11WindowList extends Applet.Applet {
             if (this._relevant(w)) this._watchWindow(w);
         });
         this._applySync(true);
-        this._subscribeLauncher();
-        this._subscribeXdnd();
+        this._applyLauncher();
+        this._applyXdnd();
         this._refresh(true);
         this.ready = true;
         this._bindHotkeys();
@@ -976,6 +1013,21 @@ class Win11WindowList extends Applet.Applet {
     // Linux's counterpart of the Windows taskbar overlay badge and progress bar: apps such as Chrome,
     // Telegram or Nemo publish them on the session bus as com.canonical.Unity.LauncherEntry.Update.
 
+    // The launcher API is a D-Bus signal every app can send (Chrome sends progress on each download tick):
+    // listen only while the option is on.
+    _applyLauncher() {
+        if (this.destroyed) return;
+        if (this.launcherApi && !this._launcherSub) {
+            this._subscribeLauncher();
+        } else if (!this.launcherApi && this._launcherSub) {
+            Gio.DBus.session.signal_unsubscribe(this._launcherSub);
+            this._launcherSub = 0;
+            this._launcher.clear();
+            this._updateBadges();
+            this._queueStates();
+        }
+    }
+
     _subscribeLauncher() {
         this._launcherSub = Gio.DBus.session.signal_subscribe(null, 'com.canonical.Unity.LauncherEntry', 'Update',
             null, null, Gio.DBusSignalFlags.NONE, (conn, sender, path, iface, name, params) => {
@@ -1012,10 +1064,18 @@ class Win11WindowList extends Applet.Applet {
     // The pointer position of a drag coming from another program reaches us through a drag monitor
     // (Cinnamon's XdndHandler forwards every position to them), so there is no polling.
 
-    _subscribeXdnd() {
-        if (!Main.xdndHandler) return;
-        this._xdndBeginId = Main.xdndHandler.connect('drag-begin', () => this._xdndBegin());
-        this._xdndEndId = Main.xdndHandler.connect('drag-end', () => this._xdndEnd());
+    // Subscribed only while the option is on.
+    _applyXdnd() {
+        if (this.destroyed || !Main.xdndHandler) return;
+        if (this.xdndHover && !this._xdndBeginId) {
+            this._xdndBeginId = Main.xdndHandler.connect('drag-begin', () => this._xdndBegin());
+            this._xdndEndId = Main.xdndHandler.connect('drag-end', () => this._xdndEnd());
+        } else if (!this.xdndHover && this._xdndBeginId) {
+            Main.xdndHandler.disconnect(this._xdndBeginId);
+            Main.xdndHandler.disconnect(this._xdndEndId);
+            this._xdndBeginId = this._xdndEndId = 0;
+            this._xdndEnd();
+        }
     }
 
     _xdndBegin() {
@@ -1125,7 +1185,7 @@ class Win11WindowList extends Applet.Applet {
         this._cancelHover();
         if (this.menu.isOpen) return;
 
-        if (btn.windows.length > 0) {
+        if (btn.windows.length > 0 && this.hoverCards) {
             this.flyout.cancelClose();
             if (this.flyout.isOpen) {
                 this.flyout.open(btn, false);            // switch buttons without delay
@@ -1136,6 +1196,7 @@ class Win11WindowList extends Applet.Applet {
             }
         } else {
             this.flyout.scheduleClose();
+            if (!this.showTooltips) return;
             this._tipTimer.set(TIP_DELAY, () => {
                 if (this._hoverButton === btn && !this.menu.isOpen) this.tip.show(btn, btn.name);
             });

@@ -119,6 +119,10 @@ def button(prefix):
     return "%s.liveButtons().find(b=>b.id.startsWith('%s'))" % (A, prefix)
 
 
+def button_exists(prefix):
+    return bool(evj("!!%s" % button(prefix)))
+
+
 def center(prefix):
     r = evj("(()=>{let b=%s;let [x,y]=b.actor.get_transformed_position();let [w,h]=b.actor.get_transformed_size();return [Math.round(x+w/2),Math.round(y+h/2)]})()" % button(prefix))
     return tuple(r) if r else None
@@ -159,6 +163,18 @@ def settings_file():
         return SETTINGS / ('%d.json' % INSTANCE)
     ids = sorted(SETTINGS.glob('*.json'))
     return ids[0] if ids else None
+
+
+def set_cfg_all(**kw):
+    """Like set_cfg, but on every bar (the options below are per bar, while some are applet-wide)."""
+    for f in SETTINGS.glob('*.json'):
+        d = json.loads(f.read_text())
+        for k, v in kw.items():
+            d[k.replace('_', '-')]['value'] = v
+        f.write_text(json.dumps(d, indent=4))
+    for f in SETTINGS.glob('*.json'):
+        ev("imports.ui.appletManager.getRunningInstancesForUuid('%s').find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (UUID, f.stem))
+    time.sleep(.7)
 
 
 def set_cfg(**kw):
@@ -903,8 +919,183 @@ def s_progress():
     check('no errors logged by progress', not errs, errs[:3])
 
 
+
+def s_lite():
+    print('\n== options that do less work: each one takes effect at once and the feature still works')
+    off = log_offset()
+    saved_cfg = settings_file().read_text()
+    try:
+        spawn_windows(2); spawn_other(); settle()
+        B = button('win:WlTest')
+        a = lambda expr: ev("''+(%s)" % expr)
+        bx, by = center('win:WlTest')
+        hover = lambda: (mv(bx - 6, by - 3), time.sleep(.05), mv(bx, by))
+
+        # ---- cards on hover
+        set_cfg(hover_cards=False)
+        hover(); time.sleep(1.0)
+        check('hover cards off: nothing opens on hover', a("%s.flyout.isOpen" % A) == 'false')
+        check('hover cards off: the app name tooltip shows instead', wait(lambda: a("%s.tip.actor!==null" % A) == 'true', 1.5))
+        settle()
+        mv(bx, by); time.sleep(.3); btn(1, True); btn(1, False)
+        check('hover cards off: a click still opens the cards', wait(lambda: a("%s.flyout.isOpen&&%s.flyout.sticky" % (A, A)) == 'true', 2))
+        settle()
+        set_cfg(hover_cards=True)
+        hover()
+        check('hover cards on: cards open on hover', wait(lambda: a("%s.flyout.isOpen" % A) == 'true', 2))
+        set_cfg(hover_cards=False)
+        check('turning it off closes cards that opened by hover', a("%s.flyout.isOpen" % A) == 'false')
+        set_cfg(hover_cards=True); settle()
+
+        # ---- thumbnails in the cards
+        ev("%s.flyout.open(%s,true)" % (A, B)); time.sleep(.5)
+        tall = lambda: evj("(()=>{let f=%s.flyout;return [...f._cards.values()].map(e=>Math.round(e.card.get_height()))})()" % A) or []
+        check('previews on: cards are tall (thumbnail)', tall() and min(tall()) > 100, tall())
+        set_cfg(show_previews=False); time.sleep(.3)
+        check('previews off: the open cards turn into compact rows at once', tall() and max(tall()) < 60 and a("%s.flyout.listMode" % A) == 'true', tall())
+        check('previews off: still one row per window', len(tall()) == 2, tall())
+        set_cfg(show_previews=True); time.sleep(.3)
+        check('previews on again: thumbnails are back at once', tall() and min(tall()) > 100, tall())
+        settle()
+        set_cfg(show_previews=False)
+        ev("%s.flyout.open(%s,true)" % (A, B)); time.sleep(.5)
+        check('previews off: new cards open as rows', tall() and max(tall()) < 60, tall())
+        settle(); set_cfg(show_previews=True)
+
+        # ---- tooltips on buttons that have no cards
+        idle = ev("(()=>{let b=%s.liveButtons().find(b=>b.app&&b.windows.length===0);return b?b.id:''})()" % A)
+        if idle:
+            ic = center(idle)
+            ih = lambda: (mv(ic[0] - 6, ic[1] - 3), time.sleep(.05), mv(ic[0], ic[1]))
+            set_cfg(show_tooltips=False); ih(); time.sleep(1.2)
+            check('tooltips off: no tooltip over a button without windows', a("%s.tip.actor===null" % A) == 'true')
+            settle(); set_cfg(show_tooltips=True); ih()
+            check('tooltips on: the tooltip shows', wait(lambda: a("%s.tip.actor!==null" % A) == 'true', 1.5))
+            settle()
+        else:
+            print('skip tooltips (every pinned app is running)')
+
+        # ---- dragging a file over a button
+        check('drag hover on: listening', a("%s._xdndBeginId>0" % A) == 'true')
+        set_cfg(xdnd_hover=False)
+        check('drag hover off: not listening', a("%s._xdndBeginId===0&&%s._xdndMonitor===null" % (A, A)) == 'true')
+        set_cfg(xdnd_hover=True)
+        check('drag hover on again: listening', a("%s._xdndBeginId>0" % A) == 'true')
+
+        # ---- launcher API
+        helper = str(ROOT / 'tests/helpers/launcher_entry.py')
+        app = ev("(()=>{let l=%s.liveButtons().filter(b=>b.app&&b.id.endsWith('.desktop'));return l.length?l[0].id:''})()" % A)
+        if app:
+            env = dict(os.environ, LAUNCHER_APP=app)
+            bt = "%s.liveButtons().find(b=>b.id==='%s')" % (A, app)
+            send = lambda *m: subprocess.run(['/usr/bin/python3', helper] + list(m), env=env)
+            check('launcher API on: subscribed', a("%s._launcherSub>0" % A) == 'true')
+            set_cfg(launcher_api=False)
+            check('launcher API off: unsubscribed', a("%s._launcherSub===0" % A) == 'true')
+            send('count'); time.sleep(.8)
+            check('launcher API off: a count sent by an app is ignored', a("%s.badgeCount===0" % bt) == 'true')
+            set_cfg(launcher_api=True)
+            send('count'); time.sleep(.5)
+            check('launcher API on again: counts arrive', a("%s.badgeCount===7" % bt) == 'true')
+            send('clear'); time.sleep(.3)
+
+        # ---- animations: the master switch and four finer ones
+        check('every motion follows the master switch', a("%s.animHighlight&&%s.animButtons&&%s.animCards&&%s.animPulse" % (A, A, A, A)) == 'true')
+        set_cfg(enable_animations=False)
+        check('master off turns all of them off', a("!%s.animHighlight&&!%s.animButtons&&!%s.animCards&&!%s.animPulse" % (A, A, A, A)) == 'true')
+        set_cfg(enable_animations=True)
+
+        # highlight fade
+        settle(); time.sleep(.5)
+        art = "%s.art" % B
+        set_cfg(animate_highlight=False)
+        mv(bx, by); time.sleep(.03)
+        check('highlight fade off: the hover level is reached at once, no transition running', evj("%s._lvT0<0&&%s._now[0]>0.06" % (art, art)) is True, evj("[%s._lvT0,%s._now]" % (art, art)))
+        settle(); set_cfg(animate_highlight=True); time.sleep(.3)
+        bx, by = center('win:WlTest')
+        mv(bx, by)
+        check('highlight fade on: the transition runs', wait(lambda: evj("%s._lvT0>=0" % art) is True, .4, .01))
+        settle()
+
+        # buttons opening / closing
+        ref = "%s.liveButtons().find(b=>b.app)" % A
+        probe = "(()=>{let a=%s;let r=%s;let b=a._createButton('win:bench',r.app,'bench');a.box.add_child(b.actor);b.animateIn();let t=b.actor.get_transition('width')!==null;let w=Math.round(b.actor.width);b.destroy(true);let rm=b.removing;b.destroyed||b.actor.destroy();return JSON.stringify({grow:t,width:w,removing:rm})})()" % (A, ref)
+        set_cfg(animate_buttons=False)
+        r = evj("JSON.parse(%s)" % probe) or {}
+        check('button animations off: a new button appears at full size, a closing one is dropped at once', r.get('grow') is False and r.get('removing') is False, r)
+        set_cfg(animate_buttons=True)
+        r = evj("JSON.parse(%s)" % probe) or {}
+        check('button animations on: a new button grows, a closing one animates out', r.get('grow') is True and r.get('removing') is True, r)
+
+        # cards, tooltips, jump list
+        tr = lambda: evj("(()=>{let f=%s.flyout;f.close(true);f.open(%s,true);let t=Math.round(f.actor.translation_y);let o=Math.round(f.actor.opacity);f.close(true);return [t,o]})()" % (A, B))
+        set_cfg(animate_cards=False)
+        t = tr()
+        check('card animations off: the cards open in place at once', t and t[0] == 0 and t[1] == 255, t)
+        ev("%s.flyout.open(%s,true)" % (A, B)); ev("%s.flyout.close(false)" % A)
+        check('card animations off: they close at once', a("%s.flyout.actor===null" % A) == 'true')
+        set_cfg(animate_cards=True)
+        t = tr()
+        check('card animations on: the cards slide in', t and t[0] != 0, t)
+        settle()
+
+        # attention pulse
+        settle()
+        spawn_other()                  # the helper window lives 9 s: take a fresh one
+        for _ in range(4):
+            activate('win:WlSkip')
+            if wait(lambda: evj("%s.focused" % B) is False, 1.5):
+                break
+        W = "%s.windows[0]" % B
+        ev("(()=>{let a=%s;a._attention.add(%s);a._queueStates();return 1})()" % (A, W)); time.sleep(.5)
+        flash = lambda: evj("[%s.art._flashTl!==null,%s.art.info().flash]" % (B, B))
+        check('pulse on: the attention flash runs on a timeline', flash() and flash()[0] is True,
+              (flash(), ev("JSON.stringify([%s.attention,%s.focused,%s._attention.size,%s.windows.length,%s.pulseAttention,%s.enableAnimations,%s.animPulse])" % (B, B, A, B, A, A, A))))
+        set_cfg(pulse_attention=False)
+        f = flash()
+        check('pulse off: a button already flashing stays lit, no timeline', f and f[0] is False and f[1] == 255, f)
+        set_cfg(pulse_attention=True)
+        check('pulse on again: it pulses again at once', (flash() or [False])[0] is True, flash())
+        ev("(()=>{let a=%s;a._attention.clear();a._queueStates();return 1})()" % A); time.sleep(.4)
+        check('attention cleared', (flash() or [True])[0] is False)
+    finally:
+        settle()
+
+    # ---- everything off together: the applet must still do its job
+    try:
+        set_cfg(hover_cards=False, show_previews=False, show_tooltips=False, xdnd_hover=False, launcher_api=False,
+                animate_highlight=False, animate_buttons=False, animate_cards=False, pulse_attention=False,
+                enable_peek=False, show_badges=False, show_progress=False, show_recent=False)
+        close_windows(); settle(); time.sleep(.5)
+        n0 = evj("%s.liveButtons().length" % A)
+        spawn_windows(3); settle(); time.sleep(.5)
+        check('all off: a button appears for the new app', wait(lambda: button_exists('win:WlTest'), 4))
+        check('all off: three windows share one button', evj("%s.windows.length" % button('win:WlTest')) == 3)
+        activate('win:WlTest'); time.sleep(.6)
+        check('all off: focus shows at once', evj("%s.focused" % button('win:WlTest')) is True)
+        cx, cy = center('win:WlTest'); mv(cx, cy); time.sleep(.8)
+        check('all off: hovering opens nothing', ev("''+%s.flyout.isOpen" % A) == 'false')
+        btn(1, True); btn(1, False); time.sleep(.5)
+        rows = evj("[...%s.flyout._cards.values()].map(e=>Math.round(e.card.get_height()))" % A) or []
+        check('all off: a click lists the windows as rows', len(rows) == 3 and max(rows) < 60, rows)
+        ev("(()=>{let a=%s;let c=[...a.flyout._cards.keys()];a.activateWindow(c[1]);return 1})()" % A); time.sleep(.5)
+        settle()
+        ev("(()=>{let a=%s;a.openMenu(%s);return 1})()" % (A, button('win:WlTest'))); time.sleep(.5)
+        check('all off: the jump list opens', ev("''+%s.menu.isOpen" % A) == 'true')
+        settle()
+        close_windows(); time.sleep(1.5); settle()
+        check('all off: the button goes away with its windows', wait(lambda: not button_exists('win:WlTest'), 4))
+        check('all off: no modal grab left', ev("''+imports.ui.main.modalCount") == '0')
+    finally:
+        settle(); close_windows()
+    settings_file().write_text(saved_cfg)
+    ev("%s.settings.remoteUpdate('x',null)" % A); time.sleep(.8)
+    errs = log_since(off)
+    check('no errors logged by the options', not errs, errs[:3])
+
+
 SECTIONS = [('health', s_health), ('lifecycle', s_lifecycle), ('settings', s_settings_fuzz), ('windows', s_windows), ('closing', s_closing),
-            ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('sync', s_sync), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language), ('liveapply', s_liveapply), ('languagelive', s_language_live), ('languageall', s_language_all), ('progress', s_progress)]
+            ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('sync', s_sync), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language), ('liveapply', s_liveapply), ('languagelive', s_language_live), ('languageall', s_language_all), ('progress', s_progress), ('lite', s_lite)]
 
 if __name__ == '__main__':
     want = sys.argv[1:]
