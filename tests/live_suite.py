@@ -404,7 +404,7 @@ def s_attention():
     seen = []
     t0 = time.time()
     while time.time() - t0 < 6.5:
-        seen.append(evj("(()=>{let b=%s;return b?{att:b.attention,fo:Math.round(b.flash.opacity),w:Math.round(b.flash.get_width()),want:%s.metrics.tileW-%s.metrics.stackInset}:null})()" % (button('win:WlTest'), A, A)))
+        seen.append(evj("(()=>{let b=%s;return b?{att:b.attention,fo:b.art.info().flash,w:b.art.info().frontW,want:%s.metrics.tileW-%s.metrics.stackInset}:null})()" % (button('win:WlTest'), A, A)))
         time.sleep(.15)
     att = [x for x in seen if x and x['att']]
     check('urgency hint marks the button', att, (len(seen), seen[:2], seen[-2:]))
@@ -629,7 +629,7 @@ def s_liveapply():
             if wait(lambda: ev("''+%s.focused" % btnjs('win:WlTest')) == 'true', 2):
                 break
         set_cfg(indicator_color='rgb(255,0,0)')
-        check('indicator colour applies', 'rgb(255,0,0)' in (ev("%s.indicator.get_style()" % btnjs('win:WlTest')) or ''), ev("%s.indicator.get_style()" % btnjs('win:WlTest')))
+        check('indicator colour applies', evj("%s.art.info().indicator.css" % btnjs('win:WlTest')) == 'rgb(255,0,0)', ev("%s.art.info().indicator.css" % btnjs('win:WlTest')))
         # animations
         set_cfg(enable_animations=False)
         check('animations off applies', ev("''+%s.animate" % A) == 'false')
@@ -638,12 +638,12 @@ def s_liveapply():
         # badges and progress (a real app button, driven through LauncherEntry)
         if app.endswith('.desktop'):
             subprocess.run(['/usr/bin/python3', helper, 'count'], env=env); time.sleep(.5)
-            vis = lambda: ev("''+%s.badge.visible" % btnjs(app))
+            vis = lambda: ev("''+(%s._badge?%s._badge.visible:false)" % (btnjs(app), btnjs(app)))
             check('badge shows', vis() == 'true')
             set_cfg(show_badges=False); check('show-badges off hides it at once', vis() == 'false')
             set_cfg(show_badges=True); check('show-badges on shows it again at once', vis() == 'true')
             subprocess.run(['/usr/bin/python3', helper, 'progress', '0.4'], env=env); time.sleep(.5)
-            track = lambda: ev("''+%s.track.visible" % btnjs(app))
+            track = lambda: 'true' if evj("%s.art.progress.mode!=='none'" % btnjs(app)) else 'false'
             has_win = evj("%s.windows.length>0" % btnjs(app))
             if has_win:
                 check('progress bar shows', track() == 'true')
@@ -820,7 +820,8 @@ def s_language_all():
         ev("%s.settings.remoteUpdate('x',null)" % I(n)); time.sleep(1.5)
     def menu_texts(n, id_):
         ev("(()=>{let a=%s;a.menu.close(true);a.flyout.close(true);a.openMenu(a.liveButtons().find(b=>b.id==='%s'));return 1})()" % (I(n), id_)); time.sleep(.7)
-        t = ev("(()=>{let a=%s;let out=[];let walk=x=>{try{if(x.get_text&&x.get_text()&&out.indexOf(x.get_text())<0)out.push(x.get_text())}catch(e){}x.get_children&&x.get_children().forEach(walk)};walk(a.menu.actor);return JSON.stringify(out)})()" % I(n))
+        # non-ASCII characters (file names with accents) do not survive the Eval round trip: compare as '?'
+        t = ev("(()=>{let a=%s;let out=[];let walk=x=>{try{let s=x.get_text&&x.get_text();if(s){s=s.replace(/[^ -~]/g,'?');if(out.indexOf(s)<0)out.push(s)}}catch(e){}x.get_children&&x.get_children().forEach(walk)};walk(a.menu.actor);return JSON.stringify(out)})()" % I(n))
         ev("%s.menu.close(true)" % I(n)); return json.loads(t.replace('\\"', '"')) if t.startswith('[') else []
     def ctx(n):
         raw = ev("JSON.stringify(%s._applet_context_menu._getMenuItems().map(i=>i.label?i.label.get_text():'-'))" % I(n))
@@ -842,12 +843,23 @@ def s_language_all():
                         cp.read(b[1], encoding='utf8')
                     except Exception:
                         continue
-                    texts = menu_texts(n, b[0])
                     for act in b[2]:
                         sec = 'Desktop Action ' + act
-                        want = cp.get(sec, 'Name' if lang == 'en' else ('Name[pt_BR]' if cp.has_option(sec, 'Name[pt_BR]') else ('Name[pt]' if cp.has_option(sec, 'Name[pt]') else 'Name')), fallback=None)
-                        if want:
-                            check('%s action "%s" shows "%s" in %s' % (b[0][:18], act, want, lang), want in texts, texts[:8])
+                        # Only names the .desktop file carries itself are checked: for the others the
+                        # shown text depends on the system's gettext catalogue, not on the file.
+                        if lang == 'en':
+                            want = cp.get(sec, 'Name', fallback=None)
+                        else:
+                            want = next((cp.get(sec, k) for k in ('Name[pt_BR]', 'Name[pt]') if cp.has_option(sec, k)), None)
+                        if not want:
+                            continue
+                        want = re.sub(r'[^ -~]', '?', want)
+                        got = []
+                        for _ in range(4):                  # the jump list fills in while recent files load
+                            got = menu_texts(n, b[0])
+                            if want in got:
+                                break
+                        check('%s action "%s" shows "%s" in %s' % (b[0][:18], act, want, lang), want in got, got[:8])
     finally:
         for n, txt in saved.items():
             (SETTINGS / ('%d.json' % n)).write_text(txt)
@@ -868,7 +880,7 @@ def s_progress():
     _children.append(p)
     send = lambda c: (p.stdin.write(c + '\n'), p.stdin.flush())
     wait(lambda: evj("%s.liveButtons().some(b=>b.id==='win:WlProg')" % A), 8); time.sleep(.8)
-    st = lambda: evj("(()=>{let b=%s.liveButtons().find(b=>b.id==='win:WlProg');return {track:b.track.visible,w:Math.round(b.fill.get_width()),x:Math.round(b.fill.get_transformed_position()[0]-b.track.get_transformed_position()[0]),tw:Math.round(b.track.get_width()),ind:b.indicator.opacity,prog:b.progress,pulse:b.pulse}})()" % A) or {}
+    st = lambda: evj("(()=>{let b=%s.liveButtons().find(b=>b.id==='win:WlProg');let i=b.art.info();return {track:i.progress.mode!=='none',w:i.progress.len,x:i.progress.from,tw:b.applet.metrics.icon,ind:Math.round(i.indicator.alpha*255),prog:b.progress,pulse:b.pulse}})()" % A) or {}
     check('no progress bar while nothing is reported', not st().get('track'))
     send('40'); time.sleep(.7); s1 = st()
     check('40 % shows the bar', s1.get('track') and s1.get('prog') == 40, s1)

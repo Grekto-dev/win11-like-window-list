@@ -108,6 +108,7 @@ class Win11WindowList extends Applet.Applet {
         this.actor.set_style_class_name('win11-tb-applet');
         this.actor.set_style('padding: 0; margin: 0;');
 
+        this.stateEpoch = 0;                // bumped when a setting changes how every button must look
         this._bindSettings();
         setLanguage(this.language);
         this._computeMetrics();
@@ -154,7 +155,10 @@ class Win11WindowList extends Applet.Applet {
         s.bindProperty(IN, 'super-num-hotkeys', 'superNumHotkeys', () => this._applyHotkeys());
         s.bindProperty(IN, 'icon-size-mode', 'iconSizeMode', () => this._onMetricsChanged());
         s.bindProperty(BOTH, 'icon-size', 'iconSize', () => this._onMetricsChanged());
-        s.bindProperty(IN, 'indicator-color', 'accentColor', () => this._queueStates());
+        s.bindProperty(IN, 'indicator-color', 'accentColor', () => {
+            this.stateEpoch++;
+            this._queueStates();
+        });
         s.bindProperty(IN, 'hover-delay', 'hoverDelay', null);
         s.bindProperty(IN, 'xdnd-delay', 'xdndDelay', null);
         s.bindProperty(IN, 'enable-peek', 'enablePeek', () => {
@@ -164,7 +168,10 @@ class Win11WindowList extends Applet.Applet {
         s.bindProperty(IN, 'peek-delay', 'peekDelay', null);
         s.bindProperty(IN, 'enable-animations', 'enableAnimations', null);
         s.bindProperty(IN, 'launch-animation', 'launchAnimation', null);
-        s.bindProperty(IN, 'show-badges', 'showBadges', () => this._updateBadges());
+        s.bindProperty(IN, 'show-badges', 'showBadges', () => {
+            this._syncBadgeTimer();
+            this._updateBadges();
+        });
         s.bindProperty(IN, 'show-progress', 'showProgress', () => this._buttons.forEach(b => {
             b._applyProgress();
             b._applyIndicator(false);
@@ -363,17 +370,34 @@ class Win11WindowList extends Applet.Applet {
         this._importPinned();
         this._syncLocale();
         this._connectGlobals();
-        global.display.list_windows(0).forEach(w => this._watchWindow(w));
+        global.display.list_windows(0).forEach(w => {
+            if (this._relevant(w)) this._watchWindow(w);
+        });
         this._applySync(true);
         this._subscribeLauncher();
         this._subscribeXdnd();
         this._refresh(true);
         this.ready = true;
         this._bindHotkeys();
-        this._badgeId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, BADGE_POLL_SECONDS, () => {
-            this._updateBadges();
-            return this.destroyed ? GLib.SOURCE_REMOVE : GLib.SOURCE_CONTINUE;
-        });
+        this._syncBadgeTimer();
+    }
+
+    // Notification counts are polled (the shell has no signal for them), but only while badges are shown.
+    _syncBadgeTimer() {
+        if (this.destroyed) return;
+        if (this.showBadges && !this._badgeId) {
+            this._badgeId = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, BADGE_POLL_SECONDS, () => {
+                if (this.destroyed || !this.showBadges) {
+                    this._badgeId = 0;
+                    return GLib.SOURCE_REMOVE;
+                }
+                this._updateBadges();
+                return GLib.SOURCE_CONTINUE;
+            });
+        } else if (!this.showBadges && this._badgeId) {
+            GLib.source_remove(this._badgeId);
+            this._badgeId = 0;
+        }
     }
 
     on_applet_removed_from_panel() {
@@ -532,22 +556,42 @@ class Win11WindowList extends Applet.Applet {
                 this._gsig.push([obj, obj.connect(name, cb)]);
             } catch (e) { /* signal not available in this Cinnamon version */ }
         };
+        // Tooltips, menus and other helper windows of other programs come and go all the time: only windows
+        // that can have a button (or that we already follow) are worth a refresh.
         c(global.display, 'window-created', (d, w) => {
+            if (!this._relevant(w)) return;
             this._watchWindow(w);
             this._queueRefresh();
         });
         c(global.display, 'notify::focus-window', () => this._onFocusChanged());
         c(global.display, 'window-demands-attention', (d, w) => this._onAttention(w));
         c(global.display, 'window-marked-urgent', (d, w) => this._onAttention(w));
-        c(global.display, 'window-entered-monitor', () => this._queueRefresh());
-        c(global.display, 'window-left-monitor', () => this._queueRefresh());
-        c(global.window_manager, 'map', () => this._queueRefresh());
+        c(global.display, 'window-entered-monitor', (d, i, w) => {
+            if (this._relevant(w)) this._queueRefresh();
+        });
+        c(global.display, 'window-left-monitor', (d, i, w) => {
+            if (this._relevant(w)) this._queueRefresh();
+        });
+        c(global.window_manager, 'map', (wm, actor) => {
+            if (this._relevant(actor && actor.meta_window)) this._queueRefresh();
+        });
         c(global.workspace_manager, 'active-workspace-changed', () => this._queueRefresh());
         c(this.appSystem, 'installed-changed', () => {
             this._appIndex = null;
             this._queueRefresh();
         });
         c(St.TextureCache.get_default(), 'icon-theme-changed', () => this._buttons.forEach(b => b.buildIcon()));
+    }
+
+    // Could this window have a button now, or does it already have one?
+    _relevant(w) {
+        if (!w) return true;
+        if (this._wsig.has(w)) return true;
+        try {
+            return !w.is_override_redirect() && Main.isInteresting(w);
+        } catch (e) {
+            return true;
+        }
     }
 
     _watchWindow(w) {
@@ -566,7 +610,6 @@ class Win11WindowList extends Applet.Applet {
         });
         c('notify::minimized', () => this._queueStates());
         c('notify::appears-focused', () => this._onWindowFocusProp(w));
-        c('notify::title', () => this.flyout.updateTitle(w));
         c('workspace-changed', () => this._queueRefresh());
         c('notify::wm-class', () => this._queueRefresh());
         c('notify::gtk-application-id', () => this._queueRefresh());
@@ -1002,13 +1045,16 @@ class Win11WindowList extends Applet.Applet {
 
     _xdndMark(actor) {
         if (this._xdndMarked === actor) return;
-        if (this._xdndMarked) {
+        const set = (a, on) => {
             try {
-                this._xdndMarked.remove_style_pseudo_class('hover');
+                if (a._delegate instanceof TaskButton) a._delegate.setForcedHover(on);
+                else if (on) a.add_style_pseudo_class('hover');
+                else a.remove_style_pseudo_class('hover');
             } catch (e) { /* destroyed */ }
-        }
+        };
+        if (this._xdndMarked) set(this._xdndMarked, false);
         this._xdndMarked = actor;
-        if (actor) actor.add_style_pseudo_class('hover');
+        if (actor) set(actor, true);
     }
 
     _buttonAt(x, y) {

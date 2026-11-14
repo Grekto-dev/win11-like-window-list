@@ -3,7 +3,7 @@ const { Clutter, St, Pango, Meta, Cinnamon } = imports.gi;
 const Main = imports.ui.main;
 const WindowUtils = imports.misc.windowUtils;
 
-const { Timer } = require('./util');
+const { Timer, appIcon } = require('./util');
 const { placeNear, preferredSize, monitorRect, revealFromPanel } = require('./popup');
 
 const EASE_OUT = Clutter.AnimationMode.EASE_OUT_QUAD;
@@ -21,6 +21,7 @@ class Flyout {
         this.sticky = false;
         this.listMode = false;
         this._cards = new Map();   // MetaWindow -> {card, label}
+        this._titleIds = new Map(); // MetaWindow -> id of its notify::title handler (only while shown)
         this._closeTimer = new Timer();
         this._peekTimer = new Timer();      // delay before the first peek
         this._peekEndTimer = new Timer();   // grace period while the pointer crosses between cards
@@ -44,6 +45,7 @@ class Flyout {
         if (!button || button.windows.length === 0) return;
         this._closeTimer.clear();
         const switching = this.isOpen;
+        const unchanged = switching && this.button === button && this._showsWindowsOf(button);
         if (sticky) this.sticky = true;
         this.button = button;
 
@@ -65,8 +67,10 @@ class Flyout {
             this.actor.opacity = 0;
         }
 
-        this._rebuild();
-        this._reposition();
+        if (!unchanged) {
+            this._rebuild();
+            this._reposition();
+        }
 
         if (!switching) {
             // Slides up from under the panel (≈ 250 ms, strong ease-out), clipped by the panel edge.
@@ -84,8 +88,30 @@ class Flyout {
             this.close(true);
             return;
         }
+        if (this._showsWindowsOf(this.button)) return;      // same cards: rebuilding would only cost
         this._rebuild();
         this._reposition();
+    }
+
+    _clearCards() {
+        this._titleIds.forEach((id, w) => {
+            try {
+                w.disconnect(id);
+            } catch (e) { /* window already gone */ }
+        });
+        this._titleIds.clear();
+        this._cards.clear();
+    }
+
+    // Are the cards on screen exactly the windows of this button, in order?
+    _showsWindowsOf(button) {
+        const ws = button.windows;
+        if (this._cards.size !== ws.length) return false;
+        let i = 0;
+        for (const w of this._cards.keys()) {
+            if (w !== ws[i++]) return false;
+        }
+        return true;
     }
 
     updateTitle(metaWindow) {
@@ -112,7 +138,7 @@ class Flyout {
         this._disarmOutside();
         this.sticky = false;
         this.button = null;
-        this._cards.clear();
+        this._clearCards();
 
         const actor = this.actor;
         this.actor = null;
@@ -146,7 +172,7 @@ class Flyout {
         this.listMode = windows.length > perRow;
 
         this._endPeek();
-        this._cards.clear();
+        this._clearCards();
         this.actor.destroy_all_children();
         this.actor.set_vertical(this.listMode);
         if (wasList !== this.listMode) this.actor.remove_style_class_name('win11-tb-flyout-list');
@@ -156,44 +182,53 @@ class Flyout {
             const entry = this.listMode ? this._makeRow(w) : this._makeCard(w);
             this.actor.add_child(entry.card);
             this._cards.set(w, entry);
+            // Titles change constantly (terminals, browsers); only the windows on screen are followed.
+            this._titleIds.set(w, w.connect('notify::title', () => this.updateTitle(w)));
         });
     }
 
     _makeIcon(size) {
-        const btn = this.button;
-        if (btn.app) {
-            try {
-                return btn.app.create_icon_texture(size);
-            } catch (e) { /* fall through */ }
-        }
-        return new St.Icon({ icon_name: 'application-x-executable', icon_size: size });
+        return appIcon(this.button.app, size);
     }
 
+    // Built from the cheapest actors that do the job (a St widget costs ≈ 0.4-1 ms to add, a Clutter
+    // actor ≈ 0.02 ms): the header is a plain box, the app icon a texture and the close button one
+    // reactive St.Icon, so a card needs 4 St widgets instead of 8.
     _makeHeader(w, closeBtnOpacity) {
         const m = this.applet.metrics;
-        const header = new St.BoxLayout({ style_class: 'win11-tb-card-header', x_expand: true });
-        header.add_child(this._makeIcon(m.px(16)));
+        const header = new Clutter.Actor({
+            layout_manager: new Clutter.BoxLayout({ spacing: m.px(8) }),
+            x_expand: true,
+        });
+        header.set_height(m.px(24));
+        const icon = this._makeIcon(m.px(16));
+        icon.set_y_align(Clutter.ActorAlign.CENTER);
+        header.add_child(icon);
 
-        const label = new St.Label({
-            style_class: 'win11-tb-card-title',
+        // Title: a bare Clutter.Text (an St.Label would cost ≈ 1 ms of style resolution per card).
+        const font = St.ThemeContext.get_for_stage(global.stage).get_font().copy();
+        font.set_absolute_size(m.px(13) * Pango.SCALE);
+        const label = new Clutter.Text({
             text: w.get_title() || '',
+            font_description: font,
+            color: new Clutter.Color({ red: 255, green: 255, blue: 255, alpha: 242 }),
+            ellipsize: Pango.EllipsizeMode.END,
             x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        label.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
         header.add_child(label);
 
-        const close = new St.Button({
+        const close = new St.Icon({
             style_class: 'win11-tb-card-close',
+            icon_name: 'window-close-symbolic',
+            icon_size: m.px(16),
             reactive: true,
-            can_focus: false,
+            track_hover: true,
             y_align: Clutter.ActorAlign.CENTER,
             opacity: closeBtnOpacity,
-            child: new St.Icon({ icon_name: 'window-close-symbolic', icon_size: m.px(16) }),
         });
-        close.set_size(m.px(24), m.px(24));
-        close.connect('clicked', () => {
-            w.delete(global.get_current_time());
+        close.connect('button-release-event', (a, event) => {
+            if (event.get_button() === 1) w.delete(global.get_current_time());
             return Clutter.EVENT_STOP;
         });
         header.add_child(close);
@@ -230,11 +265,7 @@ class Flyout {
         const { header, label, close } = this._makeHeader(w, 0);
         card.add_child(header);
 
-        const preview = new St.Bin({
-            style_class: 'win11-tb-card-preview',
-            x_align: Clutter.ActorAlign.CENTER,
-            y_align: Clutter.ActorAlign.START,
-        });
+        const preview = new Clutter.Actor({ x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.START });
         const winActor = w.get_compositor_private();
         const maxW = m.px(PREVIEW_W);
         const maxH = m.px(PREVIEW_MAX_H);
@@ -248,7 +279,10 @@ class Flyout {
                 ph = Math.max(1, Math.round(ah * s));
             }
             const clone = WindowUtils.getCloneOrContent(winActor, pw, ph);
-            if (clone) preview.set_child(clone);
+            if (clone) {
+                clone.set_position(Math.round((maxW - pw) / 2), 0);
+                preview.add_child(clone);
+            }
         }
         preview.set_size(maxW, ph);
         card.add_child(preview);

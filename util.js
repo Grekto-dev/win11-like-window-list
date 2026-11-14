@@ -1,4 +1,4 @@
-const GLib = imports.gi.GLib;
+const { GLib, St } = imports.gi;
 
 // Single-shot cancellable timer.
 class Timer {
@@ -74,4 +74,26 @@ function actionName(info, action, lang) {
     return _name(info, 'Desktop Action ' + action, info.get_action_name(action), lang);
 }
 
-module.exports = { Timer, normalizeId, appName, actionName };
+// ---- icons
+// An app icon as a plain actor: St.TextureCache.load_gicon costs ≈ 0.2 ms to create and add, an St.Icon
+// ≈ 1.1 ms. Apps without a launcher (window-backed) have no GIcon, so they use the St route.
+function appIcon(app, size) {
+    if (app) {
+        try {
+            const info = app.is_window_backed() ? null : app.get_app_info();
+            const gicon = info ? info.get_icon() : null;
+            if (gicon) {
+                const icon = St.TextureCache.get_default().load_gicon(null, gicon, size, 1, global.ui_scale || 1);
+                if (icon) {
+                    icon.set_size(size, size);
+                    return icon;
+                }
+            }
+            const tex = app.create_icon_texture(size);
+            if (tex) return tex;
+        } catch (e) { /* fall through */ }
+    }
+    return new St.Icon({ icon_name: 'application-x-executable', icon_size: size });
+}
+
+module.exports = { Timer, normalizeId, appName, actionName, appIcon };

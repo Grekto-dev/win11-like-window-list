@@ -1,3 +1,22 @@
+## 1.0.5
+
+Performance release: same features and the same look, a fraction of the work. See `docs/PERFORMANCE.md`
+for the method and the numbers.
+
+- A button is built from plain Clutter actors and two Cairo canvases instead of eleven St widgets
+  (5 actors, none of them St): adding a button to the shell takes ≈ 0.3 ms instead of ≈ 5.3 ms.
+- The applet's JavaScript time dropped to 2.5 ms for 30 s of idling (was 100 ms) and by 3.5–7x in the
+  busy scenarios (window churn, focus changes, title spam, hovering).
+- Buttons only update when something they show changed; helper windows of other programs (tooltips,
+  menus) no longer cause refreshes; title changes are followed only for windows on show.
+- Animations (tile fade, indicator, attention flash, indeterminate progress) run on the compositor's
+  frame clock instead of timers; with animations off no timer or transition runs.
+- The notification-count poll runs only while badges are enabled.
+- The thumbnail flyout opens in about half the time and is not rebuilt when its windows did not change.
+- Fix: with animations off, an attention flash no longer spins in a loop.
+- Tests: `tests/helpers/profile.py` (the profiler), `loadwin.py`, `shots.py` (captures every visual state
+  to compare two builds).
+
 ## 1.0.4
 
 - **Language is now one setting for the whole applet.** Before, each bar had its own copy: changing it in the settings of one monitor left the other bar (and its jump list) in the old language. A change on any bar is applied to all of them at once.

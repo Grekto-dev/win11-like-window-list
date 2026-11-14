@@ -1,14 +1,16 @@
-// One taskbar button: tile, optional stacked "back" tile, icon, running indicator,
-// progress bar and notification badge. Geometry and states follow docs/REFERENCE.md
-// (measured from Windows 11). Works on horizontal and vertical panels.
-const { Clutter, St, GLib } = imports.gi;
+// One taskbar button. Built from plain Clutter actors (see tileArt.js for why): a Cairo canvas under the
+// icon (tile, stacked page, attention flash), the icon, and a Cairo canvas above it (running indicator,
+// progress bar). Only the notification badge, which needs text, is a St widget, created on first use.
+// Geometry and states follow docs/REFERENCE.md (measured from Windows 11). Works on horizontal and
+// vertical panels.
+const { Clutter, St } = imports.gi;
 
 const { TileArt } = require('./tileArt');
-const { appName } = require('./util');
+const { appName, appIcon } = require('./util');
 
 const EASE_OUT = Clutter.AnimationMode.EASE_OUT_QUAD;
 const EASE_CUBIC = Clutter.AnimationMode.EASE_OUT_CUBIC;
-const EASE_SINE = Clutter.AnimationMode.EASE_IN_OUT_SINE;
+const DEFAULT_ACCENT = '#4cc2ff';
 
 class TaskButton {
     constructor(applet, id, app, fallbackName) {
@@ -23,116 +25,115 @@ class TaskButton {
         this.destroyed = false;
         this.removing = false;
         this.dragging = false;
+        this.hover = false;
         this.progress = -1;              // 0..100, -1 = none
         this.pulse = false;
         this.badgeCount = 0;
-        this._flashing = false;
         this._indicatorLen = -1;
+        this._indicatorKey = null;
         this._multi = null;
         this._pressed = false;
-        this._pulseId = 0;
-        this._pulseStart = 0;
+        this._down = 0;                  // mouse button pressed on this button, 0 = none
+        this._badge = null;
 
-        this.actor = new St.Button({
-            style_class: 'win11-tb-button',
-            reactive: true,
-            can_focus: true,
-            track_hover: true,
-            button_mask: St.ButtonMask.ONE | St.ButtonMask.TWO | St.ButtonMask.THREE,
-            x_fill: true,
-            y_fill: true,
-        });
+        // No layout manager: every child has the size of the button and is clipped with it.
+        this.actor = new Clutter.Actor({ reactive: true });
         this.actor._delegate = this;
 
-        this.layout = new St.Widget({
-            layout_manager: new Clutter.BinLayout(),
-            x_expand: true,
-            y_expand: true,
-        });
-        this.actor.set_child(this.layout);
-
-        const fill = {
-            x_expand: true,
-            y_expand: true,
-            x_align: Clutter.ActorAlign.FILL,
-            y_align: Clutter.ActorAlign.FILL,
-        };
-        // Tile and, for apps with several windows, the page behind it (one Cairo drawing).
         this.art = new TileArt(this);
         this.tile = this.art.actor;
-        this.flash = new St.Widget(Object.assign({ style_class: 'win11-tb-flash', opacity: 0, visible: false }, fill));
-        this.iconBin = new St.Widget({
-            layout_manager: new Clutter.BinLayout(),
-            x_expand: true,
-            y_expand: true,
-        });
+        this.iconBin = new Clutter.Actor({ layout_manager: new Clutter.BinLayout() });
         this.iconBin.set_pivot_point(0.5, 0.5);
-        this.indicator = new St.Widget({
-            style_class: 'win11-tb-indicator',
-            x_expand: true,
-            y_expand: true,
-            opacity: 0,
-        });
-        this.track = new St.Widget({
-            style_class: 'win11-tb-progress-track',
-            x_expand: true,
-            y_expand: true,
-            visible: false,
-        });
-        this.fill = new St.Widget({
-            style_class: 'win11-tb-progress-fill',
-            x_expand: true,
-            y_expand: true,
-            visible: false,
-        });
-        this.badge = new St.Widget({
-            style_class: 'win11-tb-badge',
-            layout_manager: new Clutter.BinLayout(),
-            x_expand: true,
-            y_expand: true,
-            x_align: Clutter.ActorAlign.CENTER,
-            y_align: Clutter.ActorAlign.CENTER,
-            visible: false,
-        });
-        this.badgeLabel = new St.Label({
-            style_class: 'win11-tb-badge-label',
-            text: '',
-            x_expand: true,
-            y_expand: true,
-            x_align: Clutter.ActorAlign.CENTER,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        this.badge.add_child(this.badgeLabel);
-
-        [this.tile, this.flash, this.iconBin, this.indicator, this.track, this.fill, this.badge]
-            .forEach(a => this.layout.add_child(a));
+        [this.tile, this.iconBin, this.art.top].forEach(a => this.actor.add_child(a));
 
         this.applyMetrics();
         this.buildIcon();
 
+        // A plain actor has no click logic of its own. Handlers that return EVENT_PROPAGATE let the drag
+        // controller (connected later) see the press; the connect_after handlers then swallow the event,
+        // as St.Button did, so it does not reach the panel and open its own context menu.
         this.actor.connect('button-press-event', (a, event) => {
-            if (event.get_button() === 1) this._setPressed(true);
+            this._down = event.get_button();
+            if (this._down === 1) this._setPressed(true);
             return Clutter.EVENT_PROPAGATE;
         });
-        this.actor.connect('button-release-event', () => {
+        this.actor.connect('button-release-event', (a, event) => {
+            const b = event.get_button();
             this._setPressed(false);
+            const clicked = this._down === b && this.hover;
+            this._down = 0;
+            if (clicked) this.applet.onButtonClicked(this, b);
             return Clutter.EVENT_PROPAGATE;
         });
+        this.actor.connect_after('button-press-event', () => Clutter.EVENT_STOP);
+        this.actor.connect_after('button-release-event', () => Clutter.EVENT_STOP);
         this.actor.connect('leave-event', () => {
+            this._down = 0;
+            this.hover = false;
             this._setPressed(false);
+            this.updateArt();
             this.applet.onButtonHover(this, false);
             return Clutter.EVENT_PROPAGATE;
         });
         this.actor.connect('enter-event', () => {
+            this.hover = true;
+            this.updateArt();
             this.applet.onButtonHover(this, true);
             return Clutter.EVENT_PROPAGATE;
         });
-        this.actor.connect('notify::hover', () => this.updateArt());
-        this.actor.connect('clicked', (a, button) => this.applet.onButtonClicked(this, button));
         this.actor.connect('destroy', () => {
             this.destroyed = true;
-            this._stopPulse();
         });
+    }
+
+    // Drag-and-drop from another program highlights the button it is held over.
+    setForcedHover(on) {
+        this._forced = on;
+        this.updateArt();
+    }
+
+    // The pointer may have moved while this button could not see it (a drag holds the grab): trust the
+    // pointer position, not the last enter / leave event.
+    refreshHover() {
+        if (this.destroyed || this.removing) return;
+        const [px, py] = global.get_pointer();
+        const [x, y] = this.actor.get_transformed_position();
+        const [w, h] = this.actor.get_transformed_size();
+        const inside = px >= x && px < x + w && py >= y && py < y + h;
+        if (inside === this.hover) return;
+        this.hover = inside;
+        this.updateArt();
+    }
+
+    // ------------------------------------------------------------- notification badge
+
+    // Created on first use: it is the only part that needs a St widget (text), and most buttons never
+    // show one.
+    get badge() {
+        if (!this._badge) {
+            this._badge = new St.Widget({
+                style_class: 'win11-tb-badge',
+                layout_manager: new Clutter.BinLayout(),
+                visible: false,
+            });
+            this._badgeLabel = new St.Label({
+                style_class: 'win11-tb-badge-label',
+                text: '',
+                x_expand: true,
+                y_expand: true,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            this._badge.add_child(this._badgeLabel);
+            this.actor.add_child(this._badge);
+            this._layoutBadge();
+        }
+        return this._badge;
+    }
+
+    get badgeLabel() {
+        this.badge;
+        return this._badgeLabel;
     }
 
     get name() {
@@ -143,103 +144,50 @@ class TaskButton {
 
     applyMetrics() {
         const m = this.applet.metrics;
-        const H = m.horizontal;
         this.actor.set_size(m.tileW, m.tileH);
-
-        // Indicator and progress bar sit on the screen-edge side of the panel, 1 px inside the tile.
-        let ax = Clutter.ActorAlign.CENTER;
-        let ay = Clutter.ActorAlign.END;
-        let dx = 0;
-        let dy = 0;
-        switch (m.side) {
-            case St.Side.TOP:
-                ay = Clutter.ActorAlign.START;
-                dy = m.indicatorEdge;
-                break;
-            case St.Side.LEFT:
-                ax = Clutter.ActorAlign.START;
-                ay = Clutter.ActorAlign.CENTER;
-                dx = m.indicatorEdge;
-                break;
-            case St.Side.RIGHT:
-                ax = Clutter.ActorAlign.END;
-                ay = Clutter.ActorAlign.CENTER;
-                dx = -m.indicatorEdge;
-                break;
-            default:
-                dy = -m.indicatorEdge;
-        }
-        [this.indicator, this.track, this.fill].forEach(a => {
-            a.set_x_align(ax);
-            a.set_y_align(ay);
-            a.translation_x = dx;
-            a.translation_y = dy;
-        });
-        const hair = Math.max(1, m.px(1));
-        this.track.set_size(H ? m.icon : hair, H ? hair : m.icon);
-        this.fill.set_size(H ? 0 : m.indicatorH, H ? m.indicatorH : 0);
-
-        // Notification badge: centred on the top-right corner of the icon.
-        const bs = Math.max(m.px(12), Math.round(m.icon * 2 / 3));
-        this.badge.set_size(bs, bs);
-        this.badge.translation_x = Math.round(m.icon / 2 - m.px(2));
-        this.badge.translation_y = -Math.round(m.icon / 2);
+        this.art.resize(m.tileW, m.tileH);
+        this.iconBin.set_size(m.tileW, m.tileH);
+        this._layoutBadge();
 
         this._indicatorLen = -1;
+        this._indicatorKey = null;
         this._multi = null;
         this._applyMulti();
         this._applyIndicator(false);
         this._applyProgress();
     }
 
+    // Notification badge: centred on the top-right corner of the icon.
+    _layoutBadge() {
+        const a = this._badge;
+        if (!a) return;
+        const m = this.applet.metrics;
+        const bs = Math.max(m.px(12), Math.round(m.icon * 2 / 3));
+        a.set_size(bs, bs);
+        a.set_position(Math.round((m.tileW - bs) / 2 + m.icon / 2 - m.px(2)), Math.round((m.tileH - bs) / 2 - m.icon / 2));
+    }
+
     _applyMulti() {
         const multi = this.windows.length > 1;
         if (multi === this._multi) return;
         this._multi = multi;
-        const m = this.applet.metrics;
-        const H = m.horizontal;
-        // The attention flash follows the front tile, which is shorter when a page peeks out behind it.
-        const a = this.flash;
-        a.set_x_align(Clutter.ActorAlign.FILL);
-        a.set_y_align(Clutter.ActorAlign.FILL);
-        a.set_width(-1);
-        a.set_height(-1);
-        if (multi) {
-            if (H) {
-                a.set_x_align(Clutter.ActorAlign.START);
-                a.set_width(m.tileW - m.stackInset);
-            } else {
-                a.set_y_align(Clutter.ActorAlign.START);
-                a.set_height(m.tileH - m.stackInset);
-            }
-        }
         this.art.setMulti(multi);
     }
 
     // Tile levels for the current hover / press / focus state (see tileArt.js).
     updateArt(animate = true) {
         if (this.destroyed) return;
-        const pressed = this._pressed === true;
-        const hover = this.actor.hover;
         let name = 'idle';
-        if (pressed) name = 'pressed';
-        else if (this.focused) name = hover ? 'focusHover' : 'focused';
-        else if (hover) name = 'hover';
+        if (this._pressed === true) name = 'pressed';
+        else if (this.focused) name = this.hover || this._forced ? 'focusHover' : 'focused';
+        else if (this.hover || this._forced) name = 'hover';
         this.art.setState(name, animate && this.applet.animate);
     }
 
     // -------------------------------------------------------------------- icon
 
     _newIcon(size) {
-        let icon = null;
-        if (this.app) {
-            try {
-                icon = this.app.create_icon_texture(size);
-            } catch (e) {
-                icon = null;
-            }
-        }
-        return icon || new St.Icon({ icon_name: 'application-x-executable', icon_size: size });
+        return appIcon(this.app, size);
     }
 
     buildIcon() {
@@ -267,48 +215,42 @@ class TaskButton {
 
     // ------------------------------------------------------------------ states
 
+    // Called for every button on every focus / window change, so it does nothing unless something this
+    // button shows has actually changed.
     update(windows, pinned, focused, attention) {
+        const old = this.windows;
+        const same = old.length === windows.length && old.every((w, i) => w === windows[i]);
+        const epoch = this.applet.stateEpoch;
+        if (same && pinned === this.pinned && focused === this.focused && attention === this.attention && epoch === this._epoch) return;
+        const focusChanged = focused !== this.focused || epoch !== this._epoch;
+        const countChanged = old.length !== windows.length;
+        this._epoch = epoch;
         this.windows = windows;
         this.pinned = pinned;
         this.focused = focused;
         this.attention = attention;
 
-        this.updateArt();
-        if (focused) this.actor.add_style_pseudo_class('focused');
-        else this.actor.remove_style_pseudo_class('focused');
-
-        if (attention) this.actor.add_style_pseudo_class('attention');
-        else this.actor.remove_style_pseudo_class('attention');
-
-        this._applyMulti();
-        this._applyProgress();
+        if (focusChanged) this.updateArt();
+        if (countChanged) {
+            this._applyMulti();
+            this._applyProgress();
+        }
         this._applyIndicator(this.applet.animate);
-        this._updateFlash();
+        this.art.setFlash(attention, this.applet.animate);
     }
 
+    // Running indicator: 6 px grey when idle, 16 px accent when focused, pink when asking for attention.
     _applyIndicator(animate) {
         const m = this.applet.metrics;
-        const H = m.horizontal;
         const running = this.windows.length > 0 && !this.dragging && !this._progressVisible;
         const len = this.focused ? m.indicatorActive : m.indicatorIdle;
-
-        const accent = this.applet.accentColor;
-        if (this.focused && !this.attention && accent) {
-            this.indicator.set_style('background-color: ' + accent + ';');
-        } else {
-            this.indicator.set_style(null);
-        }
-
-        const opacity = running ? 255 : 0;
-        this.indicator.remove_all_transitions();
-        if (!animate || this._indicatorLen < 0) {
-            this.indicator.set_size(H ? len : m.indicatorH, H ? m.indicatorH : len);
-            this.indicator.opacity = opacity;
-        } else {
-            this.indicator.ease(H
-                ? { width: len, opacity: opacity, duration: 200, mode: EASE_CUBIC }
-                : { height: len, opacity: opacity, duration: 200, mode: EASE_CUBIC });
-        }
+        let color = '';
+        if (this.attention) color = 'attention';
+        else if (this.focused) color = this.applet.accentColor || DEFAULT_ACCENT;
+        const key = len + '|' + running + '|' + color;
+        if (key === this._indicatorKey) return;        // nothing about the indicator changed
+        this._indicatorKey = key;
+        this.art.setIndicator(len, running ? 1 : 0, color, animate && this._indicatorLen >= 0);
         this._indicatorLen = len;
     }
 
@@ -329,59 +271,13 @@ class TaskButton {
 
     // While a window reports progress, the bar replaces the running indicator.
     _applyProgress() {
-        const visible = this._progressVisible;
-        this.track.visible = visible;
-        this.fill.visible = visible;
-        if (!visible) {
-            this._stopPulse();
-            return;
-        }
-        if (this.pulse) {
-            this._startPulse();
+        if (!this._progressVisible) {
+            this.art.setProgress('none');
+        } else if (this.pulse) {
+            this.art.setProgress('pulse');
         } else {
-            this._stopPulse();
             const len = Math.round(this.applet.metrics.icon * Math.min(100, this.progress) / 100);
-            this._placeFill(0, len);
-        }
-    }
-
-    // Segment [from, from + len) of the track.
-    _placeFill(from, len) {
-        const m = this.applet.metrics;
-        const centre = from - m.icon / 2 + len / 2;
-        if (m.horizontal) {
-            this.fill.set_size(Math.max(0, len), m.indicatorH);
-            this.fill.translation_x = centre;
-        } else {
-            this.fill.set_size(m.indicatorH, Math.max(0, len));
-            this.fill.translation_y = centre;
-        }
-    }
-
-    // Indeterminate progress: a segment grows from the left, slides right and shrinks (≈ 1.1 s loop).
-    _startPulse() {
-        if (this._pulseId) return;
-        this._pulseStart = GLib.get_monotonic_time();
-        this._pulseId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 40, () => {
-            if (this.destroyed || !this.pulse) {
-                this._pulseId = 0;
-                return GLib.SOURCE_REMOVE;
-            }
-            const t = (((GLib.get_monotonic_time() - this._pulseStart) / 1000) % 1100) / 1100;
-            const L = this.applet.metrics.icon;
-            const head = 1 - Math.pow(1 - Math.min(1, t / 0.7), 3);
-            const tail = t < 0.3 ? 0 : Math.pow(Math.min(1, (t - 0.3) / 0.7), 3);
-            const a = Math.round(tail * L);
-            const b = Math.round(head * L);
-            this._placeFill(a, Math.max(2, b - a));
-            return GLib.SOURCE_CONTINUE;
-        });
-    }
-
-    _stopPulse() {
-        if (this._pulseId) {
-            GLib.source_remove(this._pulseId);
-            this._pulseId = 0;
+            this.art.setProgress('bar', 0, len);
         }
     }
 
@@ -395,35 +291,12 @@ class TaskButton {
 
     _showBadge() {
         const show = this.badgeCount > 0 && this.applet.showBadges && !this.dragging;
-        this.badge.visible = show;
-        if (show) this.badgeLabel.set_text(this.badgeCount > 99 ? '99+' : String(this.badgeCount));
-    }
-
-    // ------------------------------------------------------------------- flash
-
-    _updateFlash() {
-        if (this.attention && !this._flashing) {
-            this._flashing = true;
-            this.flash.visible = true;
-            this._flashStep(true);
-        } else if (!this.attention && this._flashing) {
-            this._flashing = false;
-            this.flash.remove_all_transitions();
-            this.flash.opacity = 0;
-            this.flash.visible = false;
+        if (!show) {
+            if (this._badge) this._badge.visible = false;
+            return;
         }
-    }
-
-    // Pulses the orange overlay (≈ 2 s period, see REFERENCE.md).
-    _flashStep(up) {
-        if (!this._flashing || this.destroyed) return;
-        this.flash.ease({
-            opacity: up ? 255 : 110,
-            duration: this.applet.animate ? 1000 : 0,
-            mode: EASE_SINE,
-            onComplete: () => this._flashStep(!up),
-        });
-        if (!this.applet.animate) this.flash.opacity = 255;
+        this.badge.visible = true;
+        this.badgeLabel.set_text(this.badgeCount > 99 ? '99+' : String(this.badgeCount));
     }
 
     _setPressed(pressed) {
@@ -465,8 +338,7 @@ class TaskButton {
     // While dragged, the real icon, tile and indicator are hidden and a floating icon is shown.
     setDragging(on) {
         this.dragging = on;
-        if (on) this.actor.add_style_pseudo_class('dragging');
-        else this.actor.remove_style_pseudo_class('dragging');
+        this._pressed = false;
         this.iconBin.remove_all_transitions();
         this.iconBin.scale_x = 1;
         this.iconBin.scale_y = 1;
@@ -474,10 +346,11 @@ class TaskButton {
         this.iconBin.translation_y = 0;
         this.iconBin.opacity = on ? 0 : 255;
         this.tile.opacity = on ? 0 : 255;
-        if (on) this.flash.opacity = 0;
         this._showBadge();
         this._applyProgress();
         this._applyIndicator(false);
+        if (!on) this.refreshHover();           // the grab may have hidden the pointer's leave / enter
+        this.updateArt(false);
     }
 
     // Slides the button from `delta` px (along axis) away from its new layout position.
@@ -525,8 +398,7 @@ class TaskButton {
     // The icon drops and fades first, then the slot collapses.
     destroy(animated) {
         if (this.destroyed || this.removing) return;
-        this._flashing = false;
-        this._stopPulse();
+        this.art.destroy();
         const finish = () => {
             if (!this.destroyed) this.actor.destroy();
             this.destroyed = true;
@@ -536,7 +408,7 @@ class TaskButton {
             const H = m.horizontal;
             this.removing = true;
             this.actor.set_reactive(false);
-            this.indicator.opacity = 0;
+            this.art.top.opacity = 0;
             this.tile.opacity = 0;
             const prop = H ? 'translation_y' : 'translation_x';
             const drop = { opacity: 0, duration: 130, mode: EASE_CUBIC };

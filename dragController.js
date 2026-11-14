@@ -100,7 +100,7 @@ class ReorderDrag {
         this.started = true;
         a.beginDrag(btn);
         // St.Button grabbed the pointer on press; resetting it drops that grab, so take it again.
-        btn.actor.fake_release();
+        if (typeof btn.actor.fake_release === 'function') btn.actor.fake_release();
         this._takeModalGrab();
 
         const rect = btn.iconRect();

@@ -46,6 +46,10 @@ cd win11-like-window-list
 
 Then add **Win11-Like Window List** in *System Settings → Applets*. Remove or disable the *Grouped window list* on that panel to avoid two lists. Tested on Cinnamon 6.6.9 (X11).
 
+## Performance
+
+The applet is built to cost next to nothing when idle and a few milliseconds per event: no St widgets in a button (plain Clutter actors and Cairo canvases), diffed state updates, filtered signals and frame-clock animations. Method and measurements: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
 ## Tests
 
 ```bash
@@ -62,15 +66,16 @@ The live suite drives the real shell (D-Bus `org.Cinnamon.Eval`, XTEST pointer a
 |---|---|
 | `applet.js` | applet, window tracking, pinning, hotkeys, drag and drop |
 | `taskButton.js` | one button: icon, indicator, progress, badge, attention flash |
-| `tileArt.js` | the tile behind a button (fill + 1 px border per state) and the stacked back page of apps with several windows, drawn with Cairo |
+| `tileArt.js` | everything a button paints itself, with Cairo on plain actors: tile, stacked back page, attention flash, running indicator, progress bar, and the frame-clock animations of all of them |
 | `dragController.js` | reordering by dragging the icon |
 | `shared.js` | state shared by synchronised monitors, Super+N owner |
 | `recent.js` | recent files for the jump list |
 | `flyout.js` | thumbnail flyout and window peek |
 | `contextMenu.js` | jump list |
 | `tooltip.js`, `popup.js`, `i18n.js`, `util.js` | helpers |
-| `stylesheet.css` | colours and radii |
+| `stylesheet.css` | flyout, jump list, tooltip and badge styling (buttons are drawn in `tileArt.js`) |
 | `docs/REFERENCE.md` | measurements taken from Windows 11 |
+| `docs/PERFORMANCE.md` | how the applet is profiled and what it costs |
 | `tests/` | static checks and the live test suite |
 | `install.sh`, `scripts/` | installer, release and translation build scripts |
 

@@ -19,39 +19,6 @@
     padding: 0;
 }
 
-/* ---- button -------------------------------------------------------------- */
-
-.win11-tb-button {
-    padding: 0;
-    margin: 0;
-    border: none;
-    border-radius: 4px;
-    background-color: transparent;
-    box-shadow: none;
-    color: #ffffff;
-}
-
-/* the tile and the page behind it are drawn by tileArt.js */
-
-.win11-tb-flash {
-    border-radius: 4px;
-    background-color: rgba(255, 106, 72, 0.45);
-}
-
-/* running indicator: 6x3 grey when idle, 16x3 accent when focused */
-.win11-tb-indicator {
-    border-radius: 2px;
-    background-color: rgba(255, 255, 255, 0.55);
-}
-
-.win11-tb-button:focused .win11-tb-indicator {
-    background-color: #4cc2ff;
-}
-
-.win11-tb-button:attention .win11-tb-indicator {
-    background-color: #ff99a4;
-}
-
 /* ---- thumbnail flyout ---------------------------------------------------- */
 
 .win11-tb-flyout {
@@ -79,24 +46,15 @@
     height: 24px;
 }
 
-.win11-tb-card-title {
-    color: rgba(255, 255, 255, 0.95);
-    font-size: 13px;
-}
-
 .win11-tb-card-close {
     border-radius: 4px;
     color: #ffffff;
-    padding: 0;
+    padding: 4px;                  /* 16 px icon + 2 x 4 = the 24 px button */
     background-color: transparent;
 }
 
 .win11-tb-card-close:hover {
     background-color: rgba(255, 255, 255, 0.09);
-}
-
-.win11-tb-card-close:active {
-    background-color: rgba(255, 255, 255, 0.05);
 }
 
 .win11-tb-row {
@@ -165,18 +123,6 @@
 
 .win11-tb-menu-sep {
     background-color: rgba(255, 255, 255, 0.08);
-}
-
-/* ---- progress bar (replaces the indicator while a window reports progress) -- */
-
-.win11-tb-progress-track {
-    border-radius: 1px;
-    background-color: rgba(255, 255, 255, 0.28);
-}
-
-.win11-tb-progress-fill {
-    border-radius: 2px;
-    background-color: #4cc2ff;
 }
 
 /* ---- notification badge: accent circle at the icon's top-right corner ----- */
