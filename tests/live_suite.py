@@ -83,7 +83,7 @@ def log_since(off):
     with open(ERRLOG, 'rb') as f:
         f.seek(off)
         txt = f.read().decode('utf8', 'replace')
-    return [l for l in txt.splitlines() if re.search(r'JS ERROR|win11-window-list|Stack trace|tileArt|taskButton|flyout\.js|applet\.js', l)
+    return [l for l in txt.splitlines() if re.search(r'JS ERROR|JS WARNING|Gjs-CRITICAL|win11-window-list|Stack trace|tileArt|taskButton|flyout\.js|applet\.js', l)
             and not re.search(r'Loaded applet|Reloading applet|Upgrading|upgraded', l)]
 
 
@@ -165,16 +165,32 @@ def settings_file():
     return ids[0] if ids else None
 
 
+_last_write = {}
+
+
+def write_cfg(f, text):
+    """Writes a settings file the way Cinnamon will notice: it takes two writes to the same file within one
+    second for the same change (it compares modification times with one-second resolution), so wait."""
+    gap = time.time() - _last_write.get(str(f), 0)
+    if gap < 1.1:
+        time.sleep(1.1 - gap)
+    f.write_text(text)
+    _last_write[str(f)] = time.time()
+
+
+def _push(f):
+    ev("imports.ui.appletManager.getRunningInstancesForUuid('%s').find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (UUID, f.stem))
+
+
 def set_cfg_all(**kw):
     """Like set_cfg, but on every bar (the options below are per bar, while some are applet-wide)."""
     for f in SETTINGS.glob('*.json'):
         d = json.loads(f.read_text())
         for k, v in kw.items():
             d[k.replace('_', '-')]['value'] = v
-        f.write_text(json.dumps(d, indent=4))
-    for f in SETTINGS.glob('*.json'):
-        ev("imports.ui.appletManager.getRunningInstancesForUuid('%s').find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (UUID, f.stem))
-    time.sleep(.7)
+        write_cfg(f, json.dumps(d, indent=4))
+        _push(f)
+    time.sleep(.5)
 
 
 def set_cfg(**kw):
@@ -182,9 +198,9 @@ def set_cfg(**kw):
     d = json.loads(f.read_text())
     for k, v in kw.items():
         d[k.replace('_', '-')]['value'] = v
-    f.write_text(json.dumps(d, indent=4))
+    write_cfg(f, json.dumps(d, indent=4))
     ev("%s.settings.remoteUpdate('x',null)" % A)
-    time.sleep(.7)
+    time.sleep(.5)
 
 
 # ---------------------------------------------------------------- sections
@@ -253,7 +269,7 @@ def s_settings_fuzz():
                 check('%s=%r keeps the applet alive' % (k, a), st and st['ok'] and st['n'] > 0, st)
             set_cfg(**{k: cur})
     finally:
-        f.write_text(backup)
+        write_cfg(f, backup)
         ev("%s.settings.remoteUpdate('x',null)" % A)
         time.sleep(.8)
     errs = log_since(off)
@@ -271,11 +287,11 @@ def s_windows():
     pos = center('win:WlTest')
     # activate one window and check the focus flag
     activate('win:WlTest')
-    check('focus shows on the button', ev("''+%s.focused" % button('win:WlTest')) == 'true')
+    check('focus shows on the button', wait(lambda: ev("''+%s.focused" % button('win:WlTest')) == 'true', 2.5))
     # minimize / restore by clicking the button
     mv(*pos); time.sleep(.3); btn(1, True); btn(1, False); time.sleep(.8)
     # 3 windows -> click opens the flyout (sticky) instead of toggling; close it
-    check('click on a multi-window button opens the flyout', ev("''+%s.flyout.isOpen" % A) == 'true')
+    check('click on a multi-window button opens the flyout', wait(lambda: ev("''+%s.flyout.isOpen" % A) == 'true', 2))
     settle()
     # closing windows one at a time updates the group
     subprocess.run(['wmctrl', '-c', 'WL test 3']); time.sleep(.8)
@@ -615,7 +631,7 @@ def s_language():
         set_cfg(language='en')
         check('English removes the catalogue', not mo.exists())
     finally:
-        f.write_text(backup)
+        write_cfg(f, backup)
         ev("%s.settings.remoteUpdate('x',null)" % A)
         time.sleep(.8)
 
@@ -691,7 +707,7 @@ def s_liveapply():
         if owner.isdigit():
             of = SETTINGS / ('%s.json' % owner)
             def set_owner(v):
-                d = json.loads(of.read_text()); d['super-num-hotkeys']['value'] = v; of.write_text(json.dumps(d, indent=4))
+                d = json.loads(of.read_text()); d['super-num-hotkeys']['value'] = v; write_cfg(of, json.dumps(d, indent=4))
                 ev("%s.find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (_LIST, owner)); time.sleep(.8)
             keys = lambda: evj("[...imports.ui.main.keybindingManager.bindings.values()].filter(e=>e.name&&e.name.startsWith('win11tb-key-%s-')).length" % owner)
             ob = of.read_text()
@@ -735,7 +751,7 @@ def s_liveapply():
         subprocess.run(['wmctrl', '-r', 'WL test 2', '-t', '0'])
         check('show-all-workspaces applies at once', a1 == 1 and a2 == 2, (a1, a2))
     finally:
-        f.write_text(backup)
+        write_cfg(f, backup)
         ev("%s.settings.remoteUpdate('x',null)" % A); time.sleep(.8)
         subprocess.run(['/usr/bin/python3', helper, 'clear'], env=env)
         close_windows(); settle()
@@ -815,7 +831,7 @@ def s_language_live():
         check('English removes the catalogue', not mo.exists())
     finally:
         subprocess.run(['pkill', '-x', 'xlet-settings'])
-        f.write_text(backup)
+        write_cfg(f, backup)
         ev("%s.settings.remoteUpdate('x',null)" % A); time.sleep(.8)
         close_windows(); settle()
     errs = log_since(off)
@@ -832,7 +848,7 @@ def s_language_all():
     saved = {n: (SETTINGS / ('%d.json' % n)).read_text() for n in insts}
     def write(n, lang):
         d = json.loads((SETTINGS / ('%d.json' % n)).read_text()); d['language']['value'] = lang
-        (SETTINGS / ('%d.json' % n)).write_text(json.dumps(d, indent=4))
+        write_cfg(SETTINGS / ('%d.json' % n), json.dumps(d, indent=4))
         ev("%s.settings.remoteUpdate('x',null)" % I(n)); time.sleep(1.5)
     def menu_texts(n, id_):
         ev("(()=>{let a=%s;a.menu.close(true);a.flyout.close(true);a.openMenu(a.liveButtons().find(b=>b.id==='%s'));return 1})()" % (I(n), id_)); time.sleep(.7)
@@ -878,7 +894,7 @@ def s_language_all():
                         check('%s action "%s" shows "%s" in %s' % (b[0][:18], act, want, lang), want in got, got[:8])
     finally:
         for n, txt in saved.items():
-            (SETTINGS / ('%d.json' % n)).write_text(txt)
+            write_cfg(SETTINGS / ('%d.json' % n), txt)
         for n in insts:
             ev("%s.settings.remoteUpdate('x',null)" % I(n))
         time.sleep(1.5)
@@ -1088,47 +1104,109 @@ def s_lite():
         check('all off: no modal grab left', ev("''+imports.ui.main.modalCount") == '0')
     finally:
         settle(); close_windows()
-    settings_file().write_text(saved_cfg)
+    write_cfg(settings_file(), saved_cfg)
     ev("%s.settings.remoteUpdate('x',null)" % A); time.sleep(.8)
     errs = log_since(off)
     check('no errors logged by the options', not errs, errs[:3])
 
 
+
+def s_own_settings():
+    print('\n== the applet\'s own settings window is not listed as an app')
+    off = log_offset()
+    try:
+        subprocess.run(['pkill', '-x', 'xlet-settings']); time.sleep(.8)
+        n0 = evj("%s.liveButtons().length" % A)
+        ev("%s.configureApplet(0)" % A)
+        check('the settings window opens', wait(lambda: evj("global.display.list_windows(0).some(w=>w.get_wm_class()==='Xlet-settings.py')") is True, 6))
+        time.sleep(2)
+        check('no button for it on this bar', evj("%s.liveButtons().some(b=>/Xlet/i.test(b.id))" % A) is False)
+        check('no button for it on any bar', evj("imports.ui.appletManager.getRunningInstancesForUuid('%s').every(a=>a.liveButtons().length===%d)" % (UUID, n0)) is True)
+        ev("%s._queueRefresh()" % A); time.sleep(.8)
+        check('still none after a refresh', evj("%s.liveButtons().some(b=>/Xlet/i.test(b.id))" % A) is False)
+    finally:
+        subprocess.run(['pkill', '-x', 'xlet-settings']); time.sleep(.5)
+    errs = log_since(off)
+    check('no errors logged', not errs, errs[:3])
+
+
+
+def s_sync_storm():
+    print('\n== synchronised bars with different "all workspaces" settings must not keep refreshing each other')
+    n = evj("imports.ui.appletManager.getRunningInstancesForUuid('%s').length" % UUID)
+    if not n or n < 2:
+        print('skip (needs 2 instances)'); return
+    off = log_offset()
+    files = sorted(SETTINGS.glob('*.json'))
+    saved = {f: f.read_text() for f in files}
+    count = lambda: evj("(()=>{let c=0;imports.ui.appletManager.getRunningInstancesForUuid('%s').forEach(a=>c+=a.__refreshes||0);return c})()" % UUID)
+    try:
+        for f in files:
+            d = json.loads(f.read_text()); d['sync-monitors']['value'] = True; d['show-all-workspaces']['value'] = (f == files[0])
+            write_cfg(f, json.dumps(d, indent=4)); _push(f)
+        time.sleep(1.0)
+        ev("(()=>{imports.ui.appletManager.getRunningInstancesForUuid('%s').forEach(a=>{a.__refreshes=0;if(!a._refresh.__counted){let o=a._refresh;let f=function(...x){a.__refreshes++;return o.apply(this,x)};f.__counted=1;a._refresh=f}});return 1})()" % UUID)
+        spawn_windows(2); time.sleep(4)
+        c = count()
+        check('two bars with different workspace filters settle (%d refreshes in 4 s)' % c, c is not None and c < 30, c)
+        close_windows(); time.sleep(3)
+        c2 = count() - (c or 0)
+        check('and stay quiet afterwards (%d refreshes in 3 s)' % c2, c2 < 30, c2)
+        check('both bars show the same buttons', evj("(()=>{let l=imports.ui.appletManager.getRunningInstancesForUuid('%s').map(a=>a.liveButtons().map(b=>b.id).join());return l.every(x=>x===l[0])})()" % UUID) is True)
+    finally:
+        for f, txt in saved.items():
+            write_cfg(f, txt); _push(f)
+        ev("(()=>{imports.ui.appletManager.getRunningInstancesForUuid('%s').forEach(a=>{if(a._refresh.__counted)a._refresh=Object.getPrototypeOf(a)._refresh});return 1})()" % UUID)
+        close_windows(); time.sleep(1)
+    errs = log_since(off)
+    check('no errors logged', not errs, errs[:3])
+
+
 SECTIONS = [('health', s_health), ('lifecycle', s_lifecycle), ('settings', s_settings_fuzz), ('windows', s_windows), ('closing', s_closing),
-            ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('sync', s_sync), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language), ('liveapply', s_liveapply), ('languagelive', s_language_live), ('languageall', s_language_all), ('progress', s_progress), ('lite', s_lite)]
+            ('flyout', s_flyout_peek), ('art', s_tile_art), ('pin', s_pin_drag), ('sync', s_sync), ('attention', s_attention), ('menu', s_menu), ('launcher', s_launcher), ('xdnd', s_xdnd), ('language', s_language), ('liveapply', s_liveapply), ('languagelive', s_language_live), ('languageall', s_language_all), ('progress', s_progress), ('lite', s_lite), ('ownsettings', s_own_settings), ('syncstorm', s_sync_storm)]
+
+# The checks assume the shipped defaults for every option that switches a feature on or off (a user may
+# have turned some off); they are forced on for the run and the user's own values come back at the end.
+FEATURES = ['super-num-hotkeys', 'hover-cards', 'show-previews', 'show-tooltips', 'xdnd-hover', 'launcher-api', 'animate-highlight', 'animate-buttons',
+            'animate-cards', 'pulse-attention', 'enable-animations', 'launch-animation', 'enable-peek', 'show-badges',
+            'show-progress', 'show-recent']
+
+
+def restore_snapshot(snapshot):
+    for f, before in snapshot.items():
+        write_cfg(f, json.dumps(before, indent=4))
+        _push(f)
+    time.sleep(1.2)
+
 
 if __name__ == '__main__':
     want = sys.argv[1:]
     bind_instance()
     snapshot = {f: json.loads(f.read_text()) for f in SETTINGS.glob('*.json')}
-    # The checks read English texts: run in English (the language is one setting for all bars). The
-    # snapshot above is restored at the end, which gives the user's language back.
-    user_lang = ev("''+%s.language" % A)
-    if user_lang and user_lang != 'en':
-        set_cfg(language='en')
+    # Also run in English (the language is one setting for all bars).
+    forced = {k.replace('-', '_'): True for k in FEATURES}
+    forced['language'] = 'en'
+    ignore = set(FEATURES) | {'language'}
     try:
+        set_cfg_all(**forced)
         for name, fn in SECTIONS:
             if not want or name in want:
                 fn()
     finally:
         close_windows()
         settle()
-    # whatever a section did, every bar's settings must be what they were before the run
-    for f, before in snapshot.items():
-        try:
-            now = json.loads(f.read_text())
-        except Exception:
-            continue
-        diff = [k for k in before if isinstance(before[k], dict) and 'value' in before[k] and now.get(k, {}).get('value') != before[k]['value']]
-        if diff == ['language'] and user_lang:
-            diff = []                      # expected: the run switched to English
-            f.write_text(json.dumps(before, indent=4))
-            ev("imports.ui.appletManager.getRunningInstancesForUuid('%s').find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (UUID, f.stem))
-            time.sleep(1.2)
+        # compare what the sections left (apart from the forced options), then give the user's values back
+        left = {}
+        for f, before in snapshot.items():
+            try:
+                now = json.loads(f.read_text())
+            except Exception:
+                continue
+            left[f] = [k for k in before if k not in ignore and isinstance(before[k], dict) and 'value' in before[k]
+                       and now.get(k, {}).get('value') != before[k]['value']]
+        restore_snapshot(snapshot)
+    for f, diff in left.items():
         check('settings of bar %s unchanged by the run' % f.stem, not diff, diff)
-        if diff:
-            f.write_text(json.dumps(before, indent=4))
-            ev("imports.ui.appletManager.getRunningInstancesForUuid('%s').find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (UUID, f.stem))
     bad = [n for n, ok in results if not ok]
     print('\n%d checks, %d failed' % (len(results), len(bad)))
     for n in bad:

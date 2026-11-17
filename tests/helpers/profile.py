@@ -131,7 +131,7 @@ if __name__ == '__main__':
     finally:
         L.close_windows()
         for n, txt in saved.items():
-            (L.SETTINGS / ('%s.json' % n)).write_text(txt)
+            L.write_cfg(L.SETTINGS / ('%s.json' % n), txt)
         for n in saved:
             L.ev("imports.ui.appletManager.getRunningInstancesForUuid('%s').find(a=>a.instance_id==%s).settings.remoteUpdate('x',null)" % (L.UUID, n))
         print('\nSUMMARY ' + json.dumps({k: [v['c'], round(v['us'] / 1000, 1)] for k, v in RESULTS.items()}))

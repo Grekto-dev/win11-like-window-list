@@ -149,7 +149,10 @@ class Win11WindowList extends Applet.Applet {
         this._pinnedJson = JSON.stringify(this.pinnedApps);
         s.bindProperty(BOTH, 'pinned-imported', 'pinnedImported', null);
         s.bindProperty(BOTH, 'language', 'language', () => this._onLanguageChanged());
-        s.bindProperty(IN, 'show-all-workspaces', 'showAllWorkspaces', () => this._queueRefresh());
+        s.bindProperty(IN, 'show-all-workspaces', 'showAllWorkspaces', () => {
+            if (this._synced) Shared.refreshAll();
+            else this._queueRefresh();
+        });
         s.bindProperty(IN, 'show-all-monitors', 'showAllMonitors', () => this._queueRefresh());
         s.bindProperty(IN, 'sync-monitors', 'syncMonitors', () => this._applySync());
         s.bindProperty(IN, 'super-num-hotkeys', 'superNumHotkeys', () => this._applyHotkeys());
@@ -576,6 +579,7 @@ class Win11WindowList extends Applet.Applet {
         const snap = Shared.snapshot();
         this.pinnedApps = snap.pinned;
         this._btnOrder = snap.order.slice();
+        this._fromShared = true;          // the refresh this causes must not answer back (see _refresh)
         this._queueRefresh();
     }
 
@@ -712,9 +716,16 @@ class Win11WindowList extends Applet.Applet {
 
     // ------------------------------------------------------- window bookkeeping
 
+    // The settings window of this very applet (xlet-settings is a separate program, with no launcher of its
+    // own) is part of the applet, not an app to list.
+    _isOwnSettings(w) {
+        return w.get_wm_class() === 'Xlet-settings.py' && w.get_title() === this.metadata.name;
+    }
+
     _accepts(w) {
         if (!Main.isInteresting(w)) return false;
-        if (!this.showAllWorkspaces && !w.is_on_all_workspaces()) {
+        if (this._isOwnSettings(w)) return false;
+        if (!(this._synced ? Shared.allWorkspaces() : this.showAllWorkspaces) && !w.is_on_all_workspaces()) {
             const ws = w.get_workspace();
             if (ws !== global.workspace_manager.get_active_workspace()) return false;
         }
@@ -826,7 +837,11 @@ class Win11WindowList extends Applet.Applet {
 
         const order = this._computeOrder(groups, pinned, apps);
         this._btnOrder = order;
-        if (this._synced && !sameList(order, Shared.snapshot().order)) Shared.publish(this, pinned, order);
+        // A refresh caused by another bar's publication never answers back: two bars that disagree about
+        // the windows would otherwise correct each other for ever.
+        const answering = this._fromShared;
+        this._fromShared = false;
+        if (this._synced && !answering && !sameList(order, Shared.snapshot().order)) Shared.publish(this, pinned, order);
 
         // Reconcile buttons.
         const wanted = new Set(order);

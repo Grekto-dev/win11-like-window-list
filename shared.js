@@ -48,6 +48,21 @@ function publish(source, pinned, order) {
     });
 }
 
+// Synchronised bars must show the same windows, or each would keep "correcting" the order the other
+// published (an endless exchange). A window the user wants on any bar's workspaces filter counts for all.
+function allWorkspaces() {
+    let any = false;
+    listeners.forEach(l => {
+        if (l.showAllWorkspaces) any = true;
+    });
+    return any;
+}
+
+// A setting every synchronised bar must see changed.
+function refreshAll() {
+    listeners.forEach(l => l.onSharedChanged());
+}
+
 function count() {
     return listeners.size;
 }
@@ -78,4 +93,4 @@ function hotkeyUnregister(inst) {
     _balanceHotkeys();
 }
 
-module.exports = { join, leave, snapshot, publish, count, hotkeyRegister, hotkeyUnregister };
+module.exports = { join, leave, snapshot, publish, count, allWorkspaces, refreshAll, hotkeyRegister, hotkeyUnregister };

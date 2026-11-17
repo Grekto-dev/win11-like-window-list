@@ -1,3 +1,21 @@
+## 1.1.1
+
+- Fix: the applet's own settings window (*Configure…*) showed up as a button, with a generic icon, as if it
+  were a program. It is part of the applet and is no longer listed. Settings windows of other applets
+  are left as they were.
+- Fix (serious): with *Synchronise monitors* on and a different *Show windows of all workspaces* setting
+  on each bar, the two bars kept correcting the order the other had just published, about 100 refreshes a
+  second each, for as long as the session lasted. Synchronised bars now agree on which windows they list
+  (all workspaces counts if any bar asks for it), a change of that setting refreshes every bar, and a
+  refresh caused by another bar never answers back.
+- Fix: every app icon logged a `load_gicon: expected 3, got 5` warning (extra arguments, harmless but
+  noisy); and closing a window during a peek could log a "Clutter.Clone has already been disposed" critical.
+- Fix: a click is now recognised by where the pointer is when the button is released, not by the last enter/leave event, so a click cannot be lost when that event was missed.
+- Tests: `ownsettings` and `syncstorm` sections (the latter fails with 907 refreshes in 4 s on the old code);
+  the suite now forces every optional feature on for the run and gives yours back, writes settings files
+  at least 1.1 s apart (Cinnamon ignores a second write to the same file within the same second), and
+  also reports `JS WARNING` and `Gjs-CRITICAL` lines.
+
 ## 1.1.0
 
 New settings to turn off the parts of the applet that cost the most, for slow machines. Every one is

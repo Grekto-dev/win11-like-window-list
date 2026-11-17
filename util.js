@@ -83,7 +83,7 @@ function appIcon(app, size) {
             const info = app.is_window_backed() ? null : app.get_app_info();
             const gicon = info ? info.get_icon() : null;
             if (gicon) {
-                const icon = St.TextureCache.get_default().load_gicon(null, gicon, size, 1, global.ui_scale || 1);
+                const icon = St.TextureCache.get_default().load_gicon(null, gicon, size);
                 if (icon) {
                     icon.set_size(size, size);
                     return icon;

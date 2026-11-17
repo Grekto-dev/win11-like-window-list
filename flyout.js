@@ -391,6 +391,11 @@ class Flyout {
         global.overlay_group.add_child(clone);
         global.overlay_group.set_child_above_sibling(clone, null);
         this._clones.add(clone);
+        // A clone dies with its window: remember it, because touching a disposed actor logs a critical.
+        clone.connect('destroy', () => {
+            clone._gone = true;
+            this._clones.delete(clone);
+        });
         return clone;
     }
 
@@ -488,6 +493,7 @@ class Flyout {
 
     _dropClone(clone) {
         this._clones.delete(clone);
+        if (clone._gone) return;
         try {
             clone.remove_all_transitions();
             if (clone.get_parent()) clone.get_parent().remove_child(clone);

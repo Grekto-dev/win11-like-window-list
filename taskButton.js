@@ -60,7 +60,12 @@ class TaskButton {
         this.actor.connect('button-release-event', (a, event) => {
             const b = event.get_button();
             this._setPressed(false);
-            const clicked = this._down === b && this.hover;
+            // Inside by geometry, not by the enter/leave flag: those events can be missed when the pointer
+            // arrives while another actor holds a grab, and a lost click is worse than a lost highlight.
+            const [ex, ey] = event.get_coords();
+            const [x, y] = this.actor.get_transformed_position();
+            const [w, h] = this.actor.get_transformed_size();
+            const clicked = this._down === b && ex >= x && ex < x + w && ey >= y && ey < y + h;
             this._down = 0;
             if (clicked) this.applet.onButtonClicked(this, b);
             return Clutter.EVENT_PROPAGATE;

@@ -56,7 +56,7 @@ The applet is built to cost next to nothing when idle and a few milliseconds per
 ```bash
 python3 tests/static_check.py          # syntax, settings schema, translations (no Cinnamon needed)
 python3 tests/live_suite.py            # ~100 checks against a running Cinnamon session (see below)
-python3 tests/live_suite.py flyout art # only some sections: health lifecycle settings windows closing flyout art pin sync attention menu launcher xdnd language liveapply languagelive languageall progress lite
+python3 tests/live_suite.py flyout art # only some sections: health lifecycle settings windows closing flyout art pin sync attention menu launcher xdnd language liveapply languagelive languageall progress lite ownsettings syncstorm
 ```
 
 The live suite drives the real shell (D-Bus `org.Cinnamon.Eval`, XTEST pointer and keys, small GTK test windows and, for the drag test, Nemo). It restores the applet settings and your pinned apps, but run it on a session you are not working in: it moves the pointer, opens windows and reloads the applet. Reloads are also checked for leaks.
